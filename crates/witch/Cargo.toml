@@ -1,0 +1,16 @@
+[package]
+name = "witch"
+version = "0.1.0"
+edition = "2018"
+
+[lib]
+
+[features]
+compiler = ["dep:witch_compiler"]
+
+[dependencies]
+witch_compiler = { path = "../witch-compiler", optional = true }
+# runtime = { path = "libs/runtime" }
+
+[dev-dependencies]
+hashbrown = { version = "0.14", features = ["serde"] }
