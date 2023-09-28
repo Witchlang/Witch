@@ -1,6 +1,7 @@
+
 <div align="center">
   <a href="https://github.com/witch-lang/witch">
-    <img src="https://github.com/witch-lang/witch/assets/3601096/a0d93a70-2344-48f6-8708-5652b38d90d0">
+    <img src="https://github.com/witch-lang/witch/assets/3601096/251f4c34-6e43-42f1-b571-3d946dceb086">
   </a>
 
   <h3 align="center">The Witch Programming Language</h3>
