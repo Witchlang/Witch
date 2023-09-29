@@ -41,4 +41,3 @@ impl<'a> From<(Source, Vec<Report<'a, (String, std::ops::Range<usize>)>>)> for E
         Error::Ariadne(s, r)
     }
 }
-

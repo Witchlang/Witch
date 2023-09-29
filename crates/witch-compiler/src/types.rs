@@ -1,6 +1,6 @@
-use std::collections::HashMap;
 use core::hash::{Hash, Hasher};
 use core::mem::discriminant;
+use std::collections::HashMap;
 
 use crate::ast::Ast;
 
@@ -8,14 +8,14 @@ use crate::ast::Ast;
 pub enum TypeDecl {
     Struct {
         fields: HashMap<String, Type>,
-        methods: Vec<(String, Ast)>
+        methods: Vec<(String, Ast)>,
     },
     Interface {
-        properties: HashMap<String, Type>
-    }, 
+        properties: HashMap<String, Type>,
+    },
     Enum {
-        variants: Vec<EnumVariant>
-    }
+        variants: Vec<EnumVariant>,
+    },
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -45,7 +45,7 @@ pub enum Type {
     /// True or false
     Bool,
 
-    /// The Any type is always equal to all types. 
+    /// The Any type is always equal to all types.
     /// Very dangerous!
     Any,
 
@@ -106,16 +106,14 @@ pub enum Type {
         is_variadic: bool,
 
         /// A hashmap of defined type variables, e.g. <T, U>(arg: U) -> T {}
-        generics: HashMap<String, Self>
+        generics: HashMap<String, Self>,
     },
-
 
     /// A list of some type
     List(Box<Self>),
 
     /// A custom struct type
     Struct {
-
         /// Name of the struct type, or
         /// None of its an anonymous struct
         name: Option<String>,
@@ -129,7 +127,6 @@ pub enum Type {
 
     /// An interface that other types can be compared against
     Interface {
-
         /// Name of the interface
         name: String,
 
@@ -139,21 +136,24 @@ pub enum Type {
 
     /// An enum is simply a list of its variants.
     /// You can't instantiate an enum without a variant.
-    Enum(Vec<EnumVariant>), 
+    Enum(Vec<EnumVariant>),
 
     /// An enum variant holds its name, discriminant, associated data types,
     /// as well as any generics used
     EnumVariant(EnumVariant),
 
     /// A variable referencing to a different type (generic or custom made)
-    TypeVar(String),
-    
+    TypeVar {
+        name: String,
+        inner_types: Vec<Type>
+    },
+
     /// A variable referencing a Value
     Var(String),
 
     /// A type that merges multiple types into one.
     /// This allows us to compare type T to U: InterfaceOne + InterfaceTwo, etc
-    Intersection(Vec<Type>), 
+    Intersection(Vec<Type>),
 
     /// An unknown type is one that we haven't yet inferred, or are unable to do so
     Unknown,
@@ -170,7 +170,7 @@ impl PartialEq for Type {
 
             // Lists are equal based on their contained type
             (Type::List(v1), Type::List(v2)) => v1 == v2,
-            
+
             // Functions are compared on their arguments and return types
             (
                 Type::Function {
@@ -197,15 +197,23 @@ impl PartialEq for Type {
             }
 
             // Named structs are nominally typed, i.e. we can compare by name.
-            // For anonymous structs we make a structural comparison. 
-            (Type::Struct { name: n1, fields: f1, methods: m1 }, Type::Struct { name: n2, fields: f2, methods: m2 }) => {
-                
-                
+            // For anonymous structs we make a structural comparison.
+            (
+                Type::Struct {
+                    name: n1,
+                    fields: f1,
+                    methods: m1,
+                },
+                Type::Struct {
+                    name: n2,
+                    fields: f2,
+                    methods: m2,
+                },
+            ) => {
                 // Compare names, if any
                 if let (Some(n1), Some(n2)) = (n1, n2) {
                     return n1 == n2;
                 }
-
 
                 // Compare fields, if any
                 for (key, fieldtype1) in f1 {
@@ -230,7 +238,7 @@ impl PartialEq for Type {
                 }
 
                 true
-            },
+            }
 
             // Interface == Struct: Duck typed (as long as Struct has matching methods or fields, is a match)
             (
@@ -261,12 +269,8 @@ impl PartialEq for Type {
 
             // Checks whether an Enum Variant is of type Enum.
             // E.g. MyEnum.One == MyEnum
-            (Type::Enum(variants), Type::EnumVariant(variant)) => {
-                variants.contains(variant)
-            }
-            (Type::EnumVariant(variant), Type::Enum(variants)) => {
-                variants.contains(variant)
-            }
+            (Type::Enum(variants), Type::EnumVariant(variant)) => variants.contains(variant),
+            (Type::EnumVariant(variant), Type::Enum(variants)) => variants.contains(variant),
 
             // For primitive types, just match on the enum discriminant
             _ => core::mem::discriminant(self) == core::mem::discriminant(other),
@@ -274,10 +278,9 @@ impl PartialEq for Type {
     }
 }
 
-
 impl Hash for Type {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        // TODO recursively do this for function types. 
+        // TODO recursively do this for function types.
         discriminant(self).hash(state)
     }
 }
@@ -290,3 +293,17 @@ impl Hash for Type {
 //         }
 //     }
 // }
+
+impl From<&str> for Type {
+    fn from(str: &str) -> Type {
+        match &*str.to_lowercase() {
+            "i8" => Type::I8,
+            "i16" => Type::I16,
+            "i32" => Type::I32,
+            "i64" => Type::I64,
+            "string" => Type::String,
+            "any" => Type::Any,
+            _ => Type::TypeVar(str.to_string()),
+        }
+    }
+}

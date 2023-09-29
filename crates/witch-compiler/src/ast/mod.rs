@@ -1,20 +1,29 @@
 use std::{
     env::current_dir,
-    path::{Path, PathBuf},
+    path::{Path, PathBuf}, collections::HashMap,
 };
 
 use anyhow::{Context, Result as AnyhowResult};
-use ariadne::{Report, ReportKind, Label, Color, Source};
+use ariadne::{Color, Label, Report, ReportKind, Source};
 use chumsky::{span::SimpleSpan, Parser};
 
 use crate::types::{Type, TypeDecl};
 
 mod lexer;
 use lexer::lexer;
+mod parser;
+use parser::parser;
 
 // Dummy value for now, replace with runtime-compatible value
 #[derive(Clone, Debug, PartialEq)]
-pub enum Value {}
+pub enum Value {
+    Bool(bool),
+    String(String),
+    U8(u8),
+    I32(i32),
+    F32(f32),
+    List(Vec<Value>)
+}
 
 #[derive(Eq, PartialEq, Clone, Debug)]
 pub enum BinaryOp {
@@ -28,56 +37,57 @@ pub enum BinaryOp {
     Lt,
     Lte,
     Gt,
-    Gte
+    Gte,
 }
 
-
+/// Ast describes the abstract syntax tree used for Witch.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Ast {
-   
     // Imports a module by path
     Import(Box<PathBuf>),
 
     // A function expression defines an anonymous function (arg1, arg2) -> {expr}
     Function {
         is_variadic: bool,
-        is_method: bool,
         args: Vec<String>,
         body: Box<Self>,
-        r#type: Type
+        r#type: Type,
     },
 
     // A value expression.
-    Value {
-        value: Value,
-    },
+    Value(Value),
 
     // Let declares a new variable. It is always followed by
     // an Assignment expression.
     Let {
-        ident: String, 
-        expr: Box<Spanned<Self>>
+        ident: String,
+        expr: Box<Spanned<Self>>,
     },
 
     // Assigns an expression to a variable.
     Assignment {
-        ident: String, 
-        expr: Box<Spanned<Self>>
+        ident: String,
+        expr: Box<Spanned<Self>>,
+    },
+
+    // A named or anonymous struct.
+    // During actual struct expressions, like Foo { field: 1 },
+    // no methods are available. These are declared in the type declaration.
+    Struct {
+        name: Option<String>,
+        fields: HashMap<String, Spanned<Self>>
     },
 
     // Resolves a variable by name.
     Var(String),
 
-    // An Entry expression allows us to access entries within objects, 
-    // such as items in lists, functions in modules or fields in structs. 
-    // `is_method_call` is used to deduce whether we should keep the object on the stack
-    // in order to implicitly pass it as `self` into the called entry. 
-    Entry {
-        object: Box<Spanned<Self>>,
+    // An access expression allows us to access entries within objects,
+    // such as items in lists, functions in modules, variants in enums or fields in structs.
+    Access {
+        container: Box<Spanned<Self>>,
         key: Box<Spanned<Self>>,
-        is_method_call: bool
     },
-    
+
     // A return value to be put on the stack and return from the current scope.
     Return(Box<Spanned<Self>>),
 
@@ -89,19 +99,19 @@ pub enum Ast {
     BinaryOperation {
         a: Box<Spanned<Self>>,
         op: BinaryOp,
-        b: Box<Spanned<Self>>
+        b: Box<Spanned<Self>>,
     },
 
     /// Calls a function expresion with the provided values as arguments.
     Call {
         expr: Box<Spanned<Self>>,
-        args: Vec<Spanned<Self>>
+        args: Vec<Spanned<Self>>,
     },
 
     // A statement is an expression, and then the "rest" of the AST.
     Statement {
         expr: Box<Spanned<Self>>,
-        rest: Option<Box<Spanned<Self>>>
+        rest: Option<Box<Spanned<Self>>>,
     },
 
     // A block is a wrapper around a number of expressions with their own scope.
@@ -111,13 +121,13 @@ pub enum Ast {
     If {
         predicate: Box<Spanned<Self>>,
         then_: Box<Spanned<Self>>,
-        else_: Box<Spanned<Self>>
+        else_: Box<Spanned<Self>>,
     },
 
     // Expresses a `while` loop. (Condition, Block)
     While {
         predicate: Box<Spanned<Self>>,
-        expr: Box<Spanned<Self>>
+        expr: Box<Spanned<Self>>,
     },
 
     // Breaks the current loop
@@ -129,22 +139,18 @@ pub enum Ast {
     // A type declaration. Registers a custom type with the compiler.
     Type {
         name: String,
-        decl: TypeDecl
+        decl: TypeDecl,
     },
-
 }
 
-// Convenience types for dealing with Spans, 
-// i.e. location offsets in the incoming source code. 
+// Convenience types for dealing with Spans,
+// i.e. location offsets in the incoming source code.
 pub type Span = SimpleSpan<usize>;
 pub type Spanned<T> = (T, Span);
 
-/// Takes a filename and its source contents and parses it, 
+/// Takes a filename and its source contents and parses it,
 /// hopefully returning an abstract syntax tree.
-pub fn parse<'a>(
-    root_path: PathBuf
-) -> Result<Ast, crate::error::Error<'a>> {
-
+pub fn parse<'a>(root_path: PathBuf) -> Result<Ast, crate::error::Error<'a>> {
     let (file_path, source) = resolve_file(None, root_path)?;
 
     let (_tokens, errs) = lexer().parse(&source).into_output_errors();
@@ -196,34 +202,38 @@ pub fn parse<'a>(
     Err((Source::from(&source), reports).into())
 }
 
-
 /// Canonicalizes a file path from our `start_path`, returning the new path as well as the file contents.
-fn resolve_file(start_path: Option<PathBuf>, file_path: PathBuf) -> AnyhowResult<(PathBuf, String)> {
+fn resolve_file(
+    start_path: Option<PathBuf>,
+    file_path: PathBuf,
+) -> AnyhowResult<(PathBuf, String)> {
     let file_path = if let Some(start_path) = start_path {
         let cwd = current_dir().with_context(|| format!("Failed to get current directory"))?;
         let p = cwd
             .as_path()
             .join(Path::new(&start_path).parent().unwrap())
             .join(file_path.clone());
-        std::fs::canonicalize(p)
-            .with_context(|| {
-                format!(
-                    "Failed to canonicalize path {}",
-                    file_path.clone().to_string_lossy()
-                )
-            })?
+        std::fs::canonicalize(p).with_context(|| {
+            format!(
+                "Failed to canonicalize path {}",
+                file_path.clone().to_string_lossy()
+            )
+        })?
     } else {
         let cwd = current_dir().with_context(|| format!("Failed to get current directory"))?;
         let p = cwd.as_path().join(file_path.clone());
-        std::fs::canonicalize(p)
-            .with_context(|| {
-                format!(
-                    "Failed to canonicalize path {}",
-                    file_path.clone().to_string_lossy()
-                )
-            })?
+        std::fs::canonicalize(p).with_context(|| {
+            format!(
+                "Failed to canonicalize path {}",
+                file_path.clone().to_string_lossy()
+            )
+        })?
     };
-    let source = std::fs::read_to_string(file_path.clone())
-        .with_context(|| format!("Failed to read file {}", file_path.clone().to_string_lossy()))?;
+    let source = std::fs::read_to_string(file_path.clone()).with_context(|| {
+        format!(
+            "Failed to read file {}",
+            file_path.clone().to_string_lossy()
+        )
+    })?;
     Ok((file_path, source))
 }

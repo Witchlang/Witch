@@ -8,5 +8,5 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.75"
 ariadne = { version = "0.3.0" }
-chumsky = "1.0.0-alpha.4"
+chumsky = { version = "1.0.0-alpha.4", features = ["label", "memoization"] }
 hex = "0.4.3"
