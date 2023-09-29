@@ -8,6 +8,7 @@
 use std::path::PathBuf;
 
 mod ast;
+mod types;
 mod error;
 
 /// Takes a Witch source file and compiles it to bytecode, or returns `error::Error`.

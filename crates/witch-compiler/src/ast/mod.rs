@@ -7,12 +7,131 @@ use anyhow::{Context, Result as AnyhowResult};
 use ariadne::{Report, ReportKind, Label, Color, Source};
 use chumsky::{span::SimpleSpan, Parser};
 
-mod lexer;
+use crate::types::{Type, TypeDecl};
 
+mod lexer;
 use lexer::lexer;
 
-#[derive(Debug)]
+// Dummy value for now, replace with runtime-compatible value
+#[derive(Clone, Debug, PartialEq)]
+pub enum Value {}
+
+#[derive(Eq, PartialEq, Clone, Debug)]
+pub enum BinaryOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+    Eq,
+    NotEq,
+    Lt,
+    Lte,
+    Gt,
+    Gte
+}
+
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum Ast {
+   
+    // Imports a module by path
+    Import(Box<PathBuf>),
+
+    // A function expression defines an anonymous function (arg1, arg2) -> {expr}
+    Function {
+        is_variadic: bool,
+        is_method: bool,
+        args: Vec<String>,
+        body: Box<Self>,
+        r#type: Type
+    },
+
+    // A value expression.
+    Value {
+        value: Value,
+    },
+
+    // Let declares a new variable. It is always followed by
+    // an Assignment expression.
+    Let {
+        ident: String, 
+        expr: Box<Spanned<Self>>
+    },
+
+    // Assigns an expression to a variable.
+    Assignment {
+        ident: String, 
+        expr: Box<Spanned<Self>>
+    },
+
+    // Resolves a variable by name.
+    Var(String),
+
+    // An Entry expression allows us to access entries within objects, 
+    // such as items in lists, functions in modules or fields in structs. 
+    // `is_method_call` is used to deduce whether we should keep the object on the stack
+    // in order to implicitly pass it as `self` into the called entry. 
+    Entry {
+        object: Box<Spanned<Self>>,
+        key: Box<Spanned<Self>>,
+        is_method_call: bool
+    },
+    
+    // A return value to be put on the stack and return from the current scope.
+    Return(Box<Spanned<Self>>),
+
+    // Resolves a list of expressions, e.g.
+    // [1, 2, (1+2), get4()]
+    List(Vec<Spanned<Self>>),
+
+    // Expresses a binary operation, such as 1 <op> 1.
+    BinaryOperation {
+        a: Box<Spanned<Self>>,
+        op: BinaryOp,
+        b: Box<Spanned<Self>>
+    },
+
+    /// Calls a function expresion with the provided values as arguments.
+    Call {
+        expr: Box<Spanned<Self>>,
+        args: Vec<Spanned<Self>>
+    },
+
+    // A statement is an expression, and then the "rest" of the AST.
+    Statement {
+        expr: Box<Spanned<Self>>,
+        rest: Option<Box<Spanned<Self>>>
+    },
+
+    // A block is a wrapper around a number of expressions with their own scope.
+    Block(Box<Spanned<Self>>),
+
+    // An if expression conditionally runs the `then_` or `else_` branch depending on the predicate expression.
+    If {
+        predicate: Box<Spanned<Self>>,
+        then_: Box<Spanned<Self>>,
+        else_: Box<Spanned<Self>>
+    },
+
+    // Expresses a `while` loop. (Condition, Block)
+    While {
+        predicate: Box<Spanned<Self>>,
+        expr: Box<Spanned<Self>>
+    },
+
+    // Breaks the current loop
+    Break,
+
+    // Jumps to the next iteration of the current loop
+    Continue,
+
+    // A type declaration. Registers a custom type with the compiler.
+    Type {
+        name: String,
+        decl: TypeDecl
+    },
+
 }
 
 // Convenience types for dealing with Spans, 
