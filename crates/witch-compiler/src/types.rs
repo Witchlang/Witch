@@ -145,7 +145,7 @@ pub enum Type {
     /// A variable referencing to a different type (generic or custom made)
     TypeVar {
         name: String,
-        inner_types: Vec<Type>
+        inner_types: Vec<Type>,
     },
 
     /// A variable referencing a Value
@@ -303,7 +303,10 @@ impl From<&str> for Type {
             "i64" => Type::I64,
             "string" => Type::String,
             "any" => Type::Any,
-            _ => Type::TypeVar(str.to_string()),
+            _ => Type::TypeVar {
+                name: str.to_string(),
+                inner_types: vec![],
+            },
         }
     }
 }

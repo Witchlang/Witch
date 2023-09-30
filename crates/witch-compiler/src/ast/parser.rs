@@ -1,13 +1,13 @@
 //! A parser for our `Token` stream to turn into an `Ast`, which the compiler
 //! can generate bytecode from.
-use std::collections::HashMap;
 use chumsky::extra::Full;
 use chumsky::input::SpannedInput;
 use chumsky::prelude::*;
+use std::collections::HashMap;
 
-use crate::ast::{lexer::Token, Ast, Span, Spanned};
-use crate::types::Type;
 use crate::ast::BinaryOp;
+use crate::ast::{lexer::Token, Ast, Span, Spanned};
+use crate::types::{EnumVariant, Type, TypeDecl};
 
 use super::Value;
 
@@ -49,8 +49,7 @@ pub fn parser<'tokens: 'src, 'src: 'tokens>() -> impl Parser<
             // Type assertion
             // Ident, Ident<Wrapped>, Ident, Ident -> Ident
             let type_assertion = recursive(|type_assertion| {
-                
-                // Primitive types can easily be mapped from &str -> Type, 
+                // Primitive types can easily be mapped from &str -> Type,
                 // such as i32 or "myCustomType".
                 let primitive = select! { Token::Ident(ident) => ident }
                     .map(Type::from)
@@ -118,19 +117,17 @@ pub fn parser<'tokens: 'src, 'src: 'tokens>() -> impl Parser<
                             .collect::<Vec<Type>>()
                             .delimited_by(just(Token::Op("<")), just(Token::Op(">"))),
                     )
-                    .map(|(i, t)| {
-                        match &*i.to_lowercase() {
-                            "list" => {
-                                if t.len() != 1 {
-                                    panic!("List only supports 1 inner type");
-                                }
-                                Type::List(Box::new(t[0]))
-                            },
-                            i => Type::TypeVar {
-                                name: i.to_string(),
-                                inner_types: t
-                            },
+                    .map(|(i, t)| match &*i.to_lowercase() {
+                        "list" => {
+                            if t.len() != 1 {
+                                panic!("List only supports 1 inner type");
+                            }
+                            Type::List(Box::new(t[0].clone()))
                         }
+                        i => Type::TypeVar {
+                            name: i.to_string(),
+                            inner_types: t,
+                        },
                     });
 
                 let intersection = type_assertion
@@ -148,9 +145,9 @@ pub fn parser<'tokens: 'src, 'src: 'tokens>() -> impl Parser<
             .boxed()
             .labelled("type assertion");
 
-            let string = select! {
-                Token::Str(s) => s.strip_prefix('"').unwrap_or(s).strip_suffix('"').unwrap_or(s)
-            };
+            // let string = select! {
+            //     Token::Str(s) => s.strip_prefix('"').unwrap_or(s).strip_suffix('"').unwrap_or(s)
+            // };
 
             // Blocks are expressions but delimited with braces.
             let block = expr
@@ -264,7 +261,7 @@ pub fn parser<'tokens: 'src, 'src: 'tokens>() -> impl Parser<
                                 generics.entry(k).and_modify(|e| *e = v);
                             }
                         }
-                      
+
                         Ast::Function {
                             is_variadic,
                             args,
@@ -282,7 +279,6 @@ pub fn parser<'tokens: 'src, 'src: 'tokens>() -> impl Parser<
                 .labelled("function");
 
             let inline_expr = recursive(|inline_expr| {
-                
                 //
                 // Values
                 //
@@ -292,12 +288,11 @@ pub fn parser<'tokens: 'src, 'src: 'tokens>() -> impl Parser<
                     Token::Float(n) => Ast::Value(Value::F32(n)),
                     Token::Str(s) => Ast::Value(Value::String(s.strip_prefix('"').unwrap_or(s).strip_suffix('"').unwrap_or(s).to_string())),
                     Token::Bytes(s) => {
-                        Ast::Value(Value::List(s.into_iter().map(|byte| Value::U8(byte)).collect()))
+                        Ast::Value(Value::List(s.into_iter().map(Value::U8).collect()))
                     }
                 }
                 .labelled("value");
 
-            
                 //
                 // References a variable on the stack
                 //
@@ -376,13 +371,12 @@ pub fn parser<'tokens: 'src, 'src: 'tokens>() -> impl Parser<
                         generics.entry(k).and_modify(|e| *e = v);
                     }
                 }
-                        Ast::Function { 
+                        Ast::Function {
                             is_variadic,
                             args,
                             body,
                             r#type: Type::Function{ args: arg_types, returns: Box::new(return_type.unwrap_or(Type::Unknown)), is_variadic, generics },
                         }
-                        
                     }).map_with_span(|expr, span| (expr, span)).memoised().boxed().labelled("function");
 
                 let assignment_expr = ident
@@ -410,9 +404,8 @@ pub fn parser<'tokens: 'src, 'src: 'tokens>() -> impl Parser<
                 let let_ = just(Token::Let)
                     .ignore_then(assignment_expr)
                     .map_with_span(|((ident, maybe_type), expr), span| {
-                        let ty = maybe_type.unwrap_or(Type::Unknown);
+                        let _ty = maybe_type.unwrap_or(Type::Unknown);
                         match expr.clone() {
-                        
                         Ast::Statement{ expr: a, rest: b } => {
                             Ast::Statement{ expr: Box::new((Ast::Let { ident, expr: a.clone()}, a.1)), rest: b }
                         }
@@ -442,12 +435,11 @@ pub fn parser<'tokens: 'src, 'src: 'tokens>() -> impl Parser<
                         }
                     });
 
-            
                 //
                 // 'Atoms' are expressions that contain no ambiguity
                 //
                 let atom = choice((
-                    fn_, 
+                    fn_,
                     choice((
                         val.boxed(),
                         list.boxed(),
@@ -455,7 +447,7 @@ pub fn parser<'tokens: 'src, 'src: 'tokens>() -> impl Parser<
                         assignment.boxed(),
                         let_.boxed(),
                         var.boxed()
-                    )).map_with_span(|expr, span| (expr, span)), 
+                    )).map_with_span(|expr, span| (expr, span)),
                     expr
                     .clone()
                     .delimited_by(just(Token::Ctrl("(")), just(Token::Ctrl(")")))))
@@ -465,7 +457,7 @@ pub fn parser<'tokens: 'src, 'src: 'tokens>() -> impl Parser<
                 //
                 // References a property or entry in an object by dot notation
                 // E.g. x.y, obj.prop(), etc.    
-                    let entry_dot = inline_expr.clone().memoised().then_ignore(just(Token::Ctrl("."))).foldl(ident.clone().separated_by(just(Token::Ctrl("."))), |(expr, expr_span), key| {
+                    let entry_dot = inline_expr.clone().memoised().then_ignore(just(Token::Ctrl("."))).foldl(ident.separated_by(just(Token::Ctrl("."))), |(expr, expr_span), key| {
                         match expr.clone() {
                             Ast::Statement { expr: x, rest: Some(y)} => (
                                 Ast::Statement {
@@ -492,7 +484,7 @@ pub fn parser<'tokens: 'src, 'src: 'tokens>() -> impl Parser<
                             }
                         }
                     });
-    
+
                 //
                 // References a property or entry in an object by bracket notation
                 // E.g. x.y, obj.prop(), etc.
@@ -502,9 +494,9 @@ pub fn parser<'tokens: 'src, 'src: 'tokens>() -> impl Parser<
                         .ignore_then(inline_expr.clone())
                         .then_ignore(just(Token::Ctrl("]"))))
                     .repeated(),
-                    |a, b| (Ast::Access(Box::new(b), Box::new(a.clone()), false), a.1),
+                    |a, b| (Ast::Access{ container: Box::new(a.clone()), key: Box::new(b)}, a.1),
                 );
-    
+
                 let entry = entry_dot.or(entry_bracket);
 
                 let call = entry.or(atom.clone()).foldl(
@@ -515,20 +507,18 @@ pub fn parser<'tokens: 'src, 'src: 'tokens>() -> impl Parser<
                     |f, args| {
                         let span = f.1.start..args.1.end;
                         match f.clone() {
-                            (Ast::Statement(a, Some(b)), _) => (
-                                Ast::Statement(
-                                    a,
-                                    Some(Box::new((Ast::Call(b, args.0), span.clone().into()))),
-                                ),
+                            (Ast::Statement{ expr: a, rest: Some(b) }, _) => (
+                                Ast::Statement{
+                                    expr: a,
+                                    rest: Some(Box::new((Ast::Call{ expr: b, args: args.0 }, span.clone().into()))),
+                                },
                                 span.into(),
                             ),
-                            _ => (Ast::Call(Box::new(f), args.0), span.into()),
+                            _ => (Ast::Call{ expr: Box::new(f), args: args.0 }, span.into()),
                         }
                     },
                 )
                 .labelled("call");
-
-           
 
                 // Product ops (multiply and divide) have equal precedence
                 let op = just(Token::Op("*"))
@@ -536,7 +526,7 @@ pub fn parser<'tokens: 'src, 'src: 'tokens>() -> impl Parser<
                     .or(just(Token::Op("/")).to(BinaryOp::Div));
                 let product = call.clone().foldl(op.then(call).repeated(), |a, (op, b)| {
                     let span = a.1.start..b.1.end;
-                    (Ast::BinaryOperation(Box::new(a), op, Box::new(b)), span.into())
+                    (Ast::BinaryOperation { a: Box::new(a), op, b: Box::new(b) }, span.into() )
                 });
 
                 // Sum ops (add and subtract) have equal precedence
@@ -547,19 +537,18 @@ pub fn parser<'tokens: 'src, 'src: 'tokens>() -> impl Parser<
                     .clone()
                     .foldl(op.then(product).repeated(), |a, (op, b)| {
                         let span = a.1.start..b.1.end;
-                        (Ast::BinaryOperation(Box::new(a), op, Box::new(b)), span.into())
+                        (Ast::BinaryOperation { a: Box::new(a), op, b: Box::new(b) }, span.into() )
                     });
 
                 // Comparison ops (equal, not-equal) have equal precedence
                 let op = just(Token::Op("==")).to(BinaryOp::Eq)
                     .or(just(Token::Op("!=")).to(BinaryOp::NotEq))
                     .or(just(Token::Op("<")).to(BinaryOp::Lt))
-                    .or(just(Token::Op(">")).to(BinaryOp::Gt));
-                
+                    .or(just(Token::Op(">")).to(BinaryOp::Gt));     
 
                 sum.clone().foldl(op.then(sum).repeated(), |a, (op, b)| {
                     let span = a.1.start..b.1.end;
-                    (Ast::BinaryOperation(Box::new(a), op, Box::new(b)), span.into())
+                    (Ast::BinaryOperation { a: Box::new(a), op, b: Box::new(b) }, span.into() )
                 })
             }).memoised().boxed()
             .labelled("inline_expr");
@@ -575,14 +564,14 @@ pub fn parser<'tokens: 'src, 'src: 'tokens>() -> impl Parser<
                     )
                     .map_with_span(|((cond, a), b), span: Span| {
                         (
-                            Ast::If(
-                                Box::new(cond),
-                                Box::new(a),
+                            Ast::If {
+                                predicate: Box::new(cond),
+                                then_: Box::new(a),
                                 // If an `if` expression has no trailing `else` block, we magic up one that just produces null
-                                Box::new(
-                                    b.unwrap_or_else(|| (Ast::Value(Value::Null, Type::Any), span)),
+                                else_: Box::new(
+                                    b.unwrap_or_else(|| (Ast::Value(Value::Void), span)),
                                 ),
-                            ),
+                            },
                             span,
                         )
                     })
@@ -593,7 +582,15 @@ pub fn parser<'tokens: 'src, 'src: 'tokens>() -> impl Parser<
             let mod_ = just(Token::Mod)
                 .ignore_then(ident)
                 .then(block.clone())
-                .map_with_span(|(ident, block), span| (Ast::Mod(ident, Box::new(block)), span));
+                .map_with_span(|(ident, block), span| {
+                    (
+                        Ast::Mod {
+                            name: ident,
+                            expr: Box::new(block),
+                        },
+                        span,
+                    )
+                });
 
             // Both blocks and `if` are 'block expressions' and can appear in the place of statements
             let block_expr = block.clone().or(if_);
@@ -602,7 +599,13 @@ pub fn parser<'tokens: 'src, 'src: 'tokens>() -> impl Parser<
                 .clone()
                 .foldl(block_expr.clone().repeated(), |a, b| {
                     let span = a.1.start..b.1.end;
-                    (Ast::Statement(Box::new(a), Some(Box::new(b))), span.into())
+                    (
+                        Ast::Statement {
+                            expr: Box::new(a),
+                            rest: Some(Box::new(b)),
+                        },
+                        span.into(),
+                    )
                 });
 
             let inline_or_blocks =
@@ -614,10 +617,10 @@ pub fn parser<'tokens: 'src, 'src: 'tokens>() -> impl Parser<
                     .ignore_then(block.clone())
                     .map_with_span(|block, span| {
                         (
-                            Ast::While(
-                                Box::new((Ast::Value(Value::Bool(true), Type::Any), span)),
-                                Box::new(block),
-                            ),
+                            Ast::While {
+                                predicate: Box::new((Ast::Value(Value::Bool(true)), span)),
+                                expr: Box::new(block),
+                            },
                             span,
                         )
                     });
@@ -626,7 +629,13 @@ pub fn parser<'tokens: 'src, 'src: 'tokens>() -> impl Parser<
                 .ignore_then(expr.clone())
                 .then(block.clone())
                 .map_with_span(|(cond, block), span| {
-                    (Ast::While(Box::new(cond), Box::new(block)), span)
+                    (
+                        Ast::While {
+                            predicate: Box::new(cond),
+                            expr: Box::new(block),
+                        },
+                        span,
+                    )
                 });
 
             let loops = loop_.or(while_);
@@ -635,8 +644,14 @@ pub fn parser<'tokens: 'src, 'src: 'tokens>() -> impl Parser<
                 .ignore_then(just(Token::Ctrl(";")))
                 .ignore_then(expr.clone().or_not().boxed())
                 .map_with_span(|rest, span| {
-                    if let Some((Ast::Statement(a, _b), _)) = rest {
-                        (Ast::Statement(Box::new((Ast::Break, a.1)), None), a.1)
+                    if let Some((Ast::Statement { expr: a, .. }, _)) = rest {
+                        (
+                            Ast::Statement {
+                                expr: Box::new((Ast::Break, a.1)),
+                                rest: None,
+                            },
+                            a.1,
+                        )
                     } else {
                         (Ast::Break, span)
                     }
@@ -647,8 +662,14 @@ pub fn parser<'tokens: 'src, 'src: 'tokens>() -> impl Parser<
                 .ignore_then(just(Token::Ctrl(";")))
                 .ignore_then(expr.clone().or_not().boxed())
                 .map_with_span(|rest, span| {
-                    if let Some((Ast::Statement(a, _b), _)) = rest {
-                        (Ast::Statement(Box::new((Ast::Continue, a.1)), None), a.1)
+                    if let Some((Ast::Statement { expr: a, .. }, _)) = rest {
+                        (
+                            Ast::Statement {
+                                expr: Box::new((Ast::Continue, a.1)),
+                                rest: None,
+                            },
+                            a.1,
+                        )
                     } else {
                         (Ast::Continue, span)
                     }
@@ -694,7 +715,10 @@ pub fn parser<'tokens: 'src, 'src: 'tokens>() -> impl Parser<
                 .then_ignore(just(Token::Ctrl("}")))
                 .map_with_span(|((struct_name, fields), methods), span| {
                     (
-                        Ast::Type(struct_name, TypeDecl::Struct { fields, methods }),
+                        Ast::Type {
+                            name: struct_name,
+                            decl: TypeDecl::Struct { fields, methods },
+                        },
                         span,
                     )
                 });
@@ -725,7 +749,10 @@ pub fn parser<'tokens: 'src, 'src: 'tokens>() -> impl Parser<
                 .then_ignore(just(Token::Ctrl("}")))
                 .map_with_span(|(struct_name, properties), span| {
                     (
-                        Ast::Type(struct_name, TypeDecl::Interface { properties }),
+                        Ast::Type {
+                            name: struct_name,
+                            decl: TypeDecl::Interface { properties },
+                        },
                         span,
                     )
                 });
@@ -775,7 +802,7 @@ pub fn parser<'tokens: 'src, 'src: 'tokens>() -> impl Parser<
                 .then_ignore(just(Token::Ctrl("}")))
                 .map_with_span(
                     |(((type_name, maybe_generics), maybe_constraints), variant_data), span| {
-                        let mut generics = hashbrown::HashMap::new();
+                        let mut generics = HashMap::new();
                         if let Some(vars) = maybe_generics {
                             for v in vars.into_iter() {
                                 generics.insert(v, Type::Any);
@@ -796,7 +823,13 @@ pub fn parser<'tokens: 'src, 'src: 'tokens>() -> impl Parser<
                                 generics: generics.clone(),
                             })
                             .collect();
-                        (Ast::Type(type_name, TypeDecl::Enum { variants }), span)
+                        (
+                            Ast::Type {
+                                name: type_name,
+                                decl: TypeDecl::Enum { variants },
+                            },
+                            span,
+                        )
                     },
                 );
 
@@ -816,13 +849,16 @@ pub fn parser<'tokens: 'src, 'src: 'tokens>() -> impl Parser<
                     let b_end = b.as_ref().map(|b| b.1.end).unwrap_or(a.1.end);
 
                     if let Some((rest, rest_span)) = b.clone() {
-                        if !matches!(rest, Ast::Statement(..)) {
+                        if !matches!(rest, Ast::Statement { .. }) {
                             b = Some((Ast::Return(Box::new((rest, rest_span))), rest_span));
                         }
                     }
 
                     (
-                        Ast::Statement(Box::new(a), b.map(Box::new)),
+                        Ast::Statement {
+                            expr: Box::new(a),
+                            rest: b.map(Box::new),
+                        },
                         (a_start..b_end).into(),
                     )
                 })
@@ -832,9 +868,12 @@ pub fn parser<'tokens: 'src, 'src: 'tokens>() -> impl Parser<
             let return_ = just(Token::Return)
                 .ignore_then(statement.clone())
                 .map(|(stmt, span)| {
-                    if let Ast::Statement(a, _b) = stmt {
+                    if let Ast::Statement { expr: a, .. } = stmt {
                         (
-                            Ast::Statement(Box::new((Ast::Return(a.clone()), a.1)), None),
+                            Ast::Statement {
+                                expr: Box::new((Ast::Return(a.clone()), a.1)),
+                                rest: None,
+                            },
                             a.1,
                         )
                     } else {

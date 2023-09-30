@@ -1,6 +1,7 @@
 use std::{
+    collections::HashMap,
     env::current_dir,
-    path::{Path, PathBuf}, collections::HashMap,
+    path::{Path, PathBuf},
 };
 
 use anyhow::{Context, Result as AnyhowResult};
@@ -12,17 +13,18 @@ use crate::types::{Type, TypeDecl};
 mod lexer;
 use lexer::lexer;
 mod parser;
-use parser::parser;
+
 
 // Dummy value for now, replace with runtime-compatible value
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
+    Void,
     Bool(bool),
     String(String),
     U8(u8),
     I32(i32),
     F32(f32),
-    List(Vec<Value>)
+    List(Vec<Value>),
 }
 
 #[derive(Eq, PartialEq, Clone, Debug)]
@@ -75,7 +77,7 @@ pub enum Ast {
     // no methods are available. These are declared in the type declaration.
     Struct {
         name: Option<String>,
-        fields: HashMap<String, Spanned<Self>>
+        fields: HashMap<String, Spanned<Self>>,
     },
 
     // Resolves a variable by name.
@@ -140,6 +142,12 @@ pub enum Ast {
     Type {
         name: String,
         decl: TypeDecl,
+    },
+
+    // A named module
+    Mod {
+        name: String,
+        expr: Box<Spanned<Self>>,
     },
 }
 
