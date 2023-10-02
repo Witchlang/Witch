@@ -7,7 +7,7 @@ use std::{
 use anyhow::{Context, Result as AnyhowResult};
 use ariadne::{Color, Label, Report, ReportKind, Source};
 use chumsky::{prelude::Input, span::SimpleSpan, Parser};
-use witch_runtime::value::Value;
+use witch_runtime::{value::Value, vm::BinaryOp};
 
 use crate::types::{Type, TypeDecl};
 
@@ -16,24 +16,8 @@ use lexer::lexer;
 mod parser;
 use parser::parser;
 
-#[repr(u8)]
-#[derive(Eq, PartialEq, Clone, Debug)]
-pub enum BinaryOp {
-    Add,
-    Sub,
-    Mul,
-    Div,
-    Mod,
-    Eq,
-    NotEq,
-    Lt,
-    Lte,
-    Gt,
-    Gte,
-}
-
 /// Ast describes the abstract syntax tree used for Witch.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub enum Ast {
     // Assigns an expression to a variable.
     Assignment {

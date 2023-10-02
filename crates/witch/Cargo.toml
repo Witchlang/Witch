@@ -10,7 +10,8 @@ compiler = ["dep:witch_compiler"]
 
 [dependencies]
 witch_compiler = { path = "../witch-compiler", optional = true }
-# runtime = { path = "libs/runtime" }
+witch_runtime = { path = "../witch-runtime" }
+
 
 [dev-dependencies]
 hashbrown = { version = "0.14", features = ["serde"] }

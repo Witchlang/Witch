@@ -240,6 +240,7 @@ version = "0.1.0"
 dependencies = [
  "hashbrown 0.14.1",
  "witch_compiler",
+ "witch_runtime",
 ]
 
 [[package]]

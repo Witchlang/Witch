@@ -8,3 +8,5 @@
 
 #[cfg(feature = "compiler")]
 pub use witch_compiler::compile;
+
+pub use witch_runtime::vm::Vm;

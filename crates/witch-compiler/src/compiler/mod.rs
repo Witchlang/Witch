@@ -1,8 +1,9 @@
 //! The compiler module takes an AST representation of our program and
 //! emits bytecode from it.
 mod util;
-use crate::ast::{Ast, BinaryOp, Spanned};
+use crate::ast::{Ast, Spanned};
 use crate::types::Type;
+use witch_runtime::vm::BinaryOp;
 use witch_runtime::{value::Value, vm::Op};
 
 /// Contains all compile-time information about a locally scoped
