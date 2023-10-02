@@ -3,11 +3,11 @@
 
 use crate::ast::Span;
 use chumsky::prelude::*;
+use std::fmt;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Token<'src> {
     Import,
-    Null,
     Bool(bool),
     Int(i32),
     Float(f32),
@@ -33,37 +33,36 @@ pub enum Token<'src> {
     Where,
 }
 
-// impl<'src> fmt::Display for Token<'src> {
-//     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-//         match self {
-//             Token::Import => write!(f, "import"),
-//             Token::Null => write!(f, "null"),
-//             Token::Bytes(_x) => write!(f, "[byte(s)]"),
-//             Token::Bool(x) => write!(f, "{}", x),
-//             Token::Int(n) => write!(f, "{}", n),
-//             Token::Float(n) => write!(f, "{}", n),
-//             Token::Str(s) => write!(f, "{}", s),
-//             Token::Op(s) => write!(f, "{}", s),
-//             Token::Ctrl(c) => write!(f, "{}", c),
-//             Token::Ident(s) => write!(f, "{}", s),
-//             Token::Mod => write!(f, "mod"),
-//             Token::Fn => write!(f, "fn"),
-//             Token::Type => write!(f, "type"),
-//             Token::Struct => write!(f, "struct"),
-//             Token::Enum => write!(f, "enum"),
-//             Token::Interface => write!(f, "interface"),
-//             Token::Let => write!(f, "let"),
-//             Token::If => write!(f, "if"),
-//             Token::Else => write!(f, "else"),
-//             Token::Return => write!(f, "return"),
-//             Token::Loop => write!(f, "loop"),
-//             Token::While => write!(f, "while"),
-//             Token::Break => write!(f, "break"),
-//             Token::Continue => write!(f, "continue"),
-//             Token::Where => write!(f, "where"),
-//         }
-//     }
-// }
+impl<'src> fmt::Display for Token<'src> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Token::Import => write!(f, "import"),
+            Token::Bytes(_x) => write!(f, "[byte(s)]"),
+            Token::Bool(x) => write!(f, "{}", x),
+            Token::Int(n) => write!(f, "{}", n),
+            Token::Float(n) => write!(f, "{}", n),
+            Token::Str(s) => write!(f, "{}", s),
+            Token::Op(s) => write!(f, "{}", s),
+            Token::Ctrl(c) => write!(f, "{}", c),
+            Token::Ident(s) => write!(f, "{}", s),
+            Token::Mod => write!(f, "mod"),
+            Token::Fn => write!(f, "fn"),
+            Token::Type => write!(f, "type"),
+            Token::Struct => write!(f, "struct"),
+            Token::Enum => write!(f, "enum"),
+            Token::Interface => write!(f, "interface"),
+            Token::Let => write!(f, "let"),
+            Token::If => write!(f, "if"),
+            Token::Else => write!(f, "else"),
+            Token::Return => write!(f, "return"),
+            Token::Loop => write!(f, "loop"),
+            Token::While => write!(f, "while"),
+            Token::Break => write!(f, "break"),
+            Token::Continue => write!(f, "continue"),
+            Token::Where => write!(f, "where"),
+        }
+    }
+}
 
 /// Returns a `Parser` which takes our source input and turns it into a vec of `Token`s.
 pub fn lexer<'src>(
@@ -132,7 +131,6 @@ pub fn lexer<'src>(
         "mod" => Token::Mod,
         "true" => Token::Bool(true),
         "false" => Token::Bool(false),
-        "null" => Token::Null,
         "return" => Token::Return,
         "loop" => Token::Loop,
         "while" => Token::While,

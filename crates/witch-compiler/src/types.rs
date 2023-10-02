@@ -1,6 +1,7 @@
 use core::hash::{Hash, Hasher};
 use core::mem::discriminant;
 use std::collections::HashMap;
+use witch_runtime::value::Value;
 
 use crate::ast::Ast;
 
@@ -285,24 +286,41 @@ impl Hash for Type {
     }
 }
 
-// impl From<Value> for Type {
-//     fn from(value: Value) -> Type {
-//         match value {
-//             Value::String(_) => Type::String,
-//             _ => Type::Any,
-//         }
-//     }
-// }
+impl From<&Value> for Type {
+    fn from(value: &Value) -> Type {
+        match value {
+            Value::List(vec) => {
+                if vec.len() > 0 {
+                    Type::List(Box::new(Type::from(&vec[0])))
+                } else {
+                    Type::List(Box::new(Type::Any))
+                }
+            }
+            Value::String(_) => Type::String,
+            _ => Type::Any,
+        }
+    }
+}
 
 impl From<&str> for Type {
     fn from(str: &str) -> Type {
         match &*str.to_lowercase() {
-            "i8" => Type::I8,
-            "i16" => Type::I16,
-            "i32" => Type::I32,
-            "i64" => Type::I64,
+            "void" => Type::Void,
+            "bool" => Type::Bool,
             "string" => Type::String,
             "any" => Type::Any,
+            "i8" => Type::I8,
+            "u8" => Type::U8,
+            "i16" => Type::I16,
+            "u16" => Type::U16,
+            "i32" => Type::I32,
+            "u32" => Type::U32,
+            "i64" => Type::I64,
+            "u64" => Type::U64,
+            "i128" => Type::I128,
+            "u128" => Type::U128,
+            "isize" => Type::Isize,
+            "usize" => Type::Usize,
             _ => Type::TypeVar {
                 name: str.to_string(),
                 inner_types: vec![],

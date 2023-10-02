@@ -6,27 +6,17 @@ use std::{
 
 use anyhow::{Context, Result as AnyhowResult};
 use ariadne::{Color, Label, Report, ReportKind, Source};
-use chumsky::{span::SimpleSpan, Parser};
+use chumsky::{prelude::Input, span::SimpleSpan, Parser};
+use witch_runtime::value::Value;
 
 use crate::types::{Type, TypeDecl};
 
 mod lexer;
 use lexer::lexer;
 mod parser;
+use parser::parser;
 
-
-// Dummy value for now, replace with runtime-compatible value
-#[derive(Clone, Debug, PartialEq)]
-pub enum Value {
-    Void,
-    Bool(bool),
-    String(String),
-    U8(u8),
-    I32(i32),
-    F32(f32),
-    List(Vec<Value>),
-}
-
+#[repr(u8)]
 #[derive(Eq, PartialEq, Clone, Debug)]
 pub enum BinaryOp {
     Add,
@@ -45,6 +35,12 @@ pub enum BinaryOp {
 /// Ast describes the abstract syntax tree used for Witch.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Ast {
+    // Assigns an expression to a variable.
+    Assignment {
+        ident: String,
+        expr: Box<Spanned<Self>>,
+    },
+
     // Imports a module by path
     Import(Box<PathBuf>),
 
@@ -62,12 +58,6 @@ pub enum Ast {
     // Let declares a new variable. It is always followed by
     // an Assignment expression.
     Let {
-        ident: String,
-        expr: Box<Spanned<Self>>,
-    },
-
-    // Assigns an expression to a variable.
-    Assignment {
         ident: String,
         expr: Box<Spanned<Self>>,
     },
@@ -158,43 +148,39 @@ pub type Spanned<T> = (T, Span);
 
 /// Takes a filename and its source contents and parses it,
 /// hopefully returning an abstract syntax tree.
-pub fn parse<'a>(root_path: PathBuf) -> Result<Ast, crate::error::Error<'a>> {
+pub fn parse<'a>(root_path: PathBuf) -> Result<Spanned<Ast>, crate::error::Error<'a>> {
     let (file_path, source) = resolve_file(None, root_path)?;
 
-    let (_tokens, errs) = lexer().parse(&source).into_output_errors();
+    let (tokens, errs) = lexer().parse(&source).into_output_errors();
 
-    // let (expr, parse_errs) = if let Some(tokens) = &tokens {
-    //     let (ast, parse_errs) = parser()
-    //         .map_with_span(|ast, span| (ast, span))
-    //         .parse(
-    //             tokens
-    //                 .as_slice()
-    //                 .spanned((string.len()..string.len()).into()),
-    //         )
-    //         .into_output_errors();
-    //     if let Some((expr, _file_span)) = ast.filter(|_| errs.len() + parse_errs.len() == 0) {
-    //         (Some(expr.0), parse_errs)
-    //     } else {
-    //         (None, parse_errs)
-    //     }
-    // } else {
-    //     (None, Vec::new())
-    // };
+    let (expr, parse_errs) = if let Some(tokens) = &tokens {
+        let (ast, parse_errs) = parser()
+            .map_with_span(|ast, span| (ast, span))
+            .parse(tokens.as_slice().spanned((0..source.len()).into()))
+            .into_output_errors();
+        if let Some((expr, _file_span)) = ast.filter(|_| errs.len() + parse_errs.len() == 0) {
+            (Some(expr), parse_errs)
+        } else {
+            (None, parse_errs)
+        }
+    } else {
+        (None, Vec::new())
+    };
 
-    // if let Some(expr) = expr {
-    //     return Ok(expr);
-    // }
+    if let Some(expr) = expr {
+        return Ok(expr);
+    }
 
     let file_path_string = file_path.clone().to_string_lossy().to_string();
 
     let reports: Vec<Report<'a, (String, std::ops::Range<usize>)>> = errs
         .into_iter()
         .map(|e| e.map_token(|c| c.to_string()))
-        // .chain(
-        //     parse_errs
-        //         .into_iter()
-        //         .map(|e| e.map_token(|tok| tok.to_string())),
-        // )
+        .chain(
+            parse_errs
+                .into_iter()
+                .map(|e| e.map_token(|tok| tok.to_string())),
+        )
         .map(|e| {
             Report::build(ReportKind::Error, file_path_string.clone(), e.span().start)
                 .with_message(e.to_string())

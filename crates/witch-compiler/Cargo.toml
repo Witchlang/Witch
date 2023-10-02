@@ -6,6 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+bincode = { version = "2.0.0-rc.3", features = ["serde"] }
+witch_runtime = { path = "../witch-runtime" }
 anyhow = "1.0.75"
 ariadne = { version = "0.3.0" }
 chumsky = { version = "1.0.0-alpha.4", features = ["label", "memoization"] }
