@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::vm::Op;
 
+#[cfg_attr(debug_assertions, derive(Debug))]
 #[derive(Serialize, Deserialize, PartialEq, Clone)]
 #[repr(C, u8)]
 pub enum Value {
@@ -28,6 +29,7 @@ pub enum Value {
     F64(f64),
 }
 
+#[cfg_attr(debug_assertions, derive(Debug))]
 #[derive(Serialize, Deserialize, PartialEq, Clone)]
 pub enum Error {
     InvalidOp(Op),

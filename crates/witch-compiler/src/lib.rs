@@ -8,14 +8,21 @@
 
 use std::path::PathBuf;
 
+use compiler::Context;
+
 mod ast;
 mod compiler;
 mod error;
 mod types;
 
 /// Takes a Witch source file and compiles it to bytecode, or returns `error::Error`.
-pub fn compile<'a>(file_path: PathBuf) -> Result<Vec<u8>, error::Error<'a>> {
+pub fn compile<'a>(
+    file_path: PathBuf,
+    maybe_ctx: Option<Context>,
+) -> Result<(Vec<u8>, Context), error::Error<'a>> {
     let ast = ast::parse(file_path)?;
-    let (bc, _) = compiler::compile(&mut compiler::Context::default(), &ast)?;
-    Ok(bc)
+    let mut ctx = maybe_ctx.unwrap_or_default();
+    let (bc, _) = compiler::compile(&mut ctx, &ast)?;
+    let prelude = ctx.flush();
+    Ok(([prelude, bc].concat(), ctx))
 }

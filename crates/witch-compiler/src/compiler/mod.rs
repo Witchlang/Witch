@@ -18,8 +18,14 @@ pub struct LocalVariable {
 }
 
 #[derive(Debug, Clone)]
-pub struct Scope {
+struct Scope {
     pub locals: Vec<LocalVariable>,
+}
+
+#[derive(Debug, Default, Clone)]
+struct Cached {
+    bytecode: Vec<u8>,
+    flushed: bool,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -30,8 +36,80 @@ pub struct Context {
     /// `compile` iteration up the the root node.
     pub lineage: Vec<Spanned<Ast>>,
 
-    /// Raw values to prepend to the stack on startup
-    pub values: Vec<Vec<u8>>,
+    /// Values get cached in order keep the subsequent programs smaller
+    pub functions_cache: Vec<Cached>,
+    pub value_cache: Vec<Cached>,
+}
+
+impl Context {
+    /// Flushes the current context.
+    /// Unflushed cached values get returned as a `prelude` bytecode and marked as such.
+    /// Scopes and AST lineage of the context get reset.
+    pub fn flush(&mut self) -> Vec<u8> {
+        let mut bc = vec![];
+        let mut len: usize = 0;
+        for cached in self.value_cache.iter_mut() {
+            if !cached.flushed {
+                cached.flushed = true;
+                bc.append(&mut cached.bytecode.clone());
+                len += 1;
+            }
+        }
+        bc.push(Op::SetupValueCache as u8);
+        let len: [u8; std::mem::size_of::<usize>()] = len.to_ne_bytes();
+        bc.append(&mut len.to_vec());
+
+        let mut len: usize = 0;
+        for cached in self.functions_cache.iter_mut() {
+            if !cached.flushed {
+                cached.flushed = true;
+                bc.append(&mut cached.bytecode.clone());
+                len += 1;
+            }
+        }
+        bc.push(Op::SetupFunctionCache as u8);
+        let len: [u8; std::mem::size_of::<usize>()] = len.to_ne_bytes();
+        bc.append(&mut len.to_vec());
+        return bc;
+    }
+
+    /// Adds a value bytecode to the cache, unless it has already been cached
+    /// before. Whether the cached value has been flushed in a previous script
+    /// has no bearing on the cached entry index.
+    pub fn cache_value(&mut self, value_bytecode: Vec<u8>) -> usize {
+        if let Some(idx) = self
+            .value_cache
+            .iter()
+            .position(|cached| &cached.bytecode == &value_bytecode)
+        {
+            return idx;
+        } else {
+            self.value_cache.push(Cached {
+                bytecode: value_bytecode,
+                flushed: false,
+            });
+            return self.value_cache.len();
+        }
+    }
+
+    /// Adds a fn bytecode to the cache, unless it has already been cached
+    /// before. Whether the cached value has been flushed in a previous script
+    /// has no bearing on the cached entry index.
+    pub fn cache_fn(&mut self, fn_bytecode: Vec<u8>) -> usize {
+        if let Some(idx) = self
+            .functions_cache
+            .iter()
+            .position(|cached| &cached.bytecode == &fn_bytecode)
+        {
+            return idx;
+        } else {
+            self.functions_cache.push(Cached {
+                bytecode: fn_bytecode,
+                flushed: false,
+            });
+            return self.functions_cache.len();
+        }
+    }
 }
 
 /// Turns an AST into bytecode
@@ -42,24 +120,14 @@ pub fn compile<'a>(
     ctx.lineage.push(ast.clone());
 
     let (bytecode, return_type) = match &ast.0 {
-        //  Ast::Access { container, key } => access(ctx, container, key)?,
         // Ast::Assignment { ident, expr } => assignment(ctx, ident, expr)?,
         Ast::BinaryOperation { a, op, b } => binary_operation(ctx, a, op, b)?,
+        //  Ast::Member { container, key } => member(ctx, container, key)?,
         Ast::Value(v) => value(ctx, v)?,
         x => todo!("{:?}", x),
     };
 
     Ok((bytecode, return_type))
-}
-
-/// Accesses an entry within an Object or Vector, by first putting the backing Object
-/// on the stack and subsequently the Key as an Access Opcode.
-fn access<'a>(
-    ctx: &mut Context,
-    container: &Box<Spanned<Ast>>,
-    key: &Box<Spanned<Ast>>,
-) -> Result<(Vec<u8>, Type), crate::error::Error<'a>> {
-    Ok((vec![], Type::Unknown))
 }
 
 /// Assigns a local variable by setting its new value without initializing it.
@@ -102,6 +170,16 @@ fn binary_operation<'a>(
     Ok((bytecode, return_type))
 }
 
+/// Accesses a member within an Object or Vector, by first putting the backing Object
+/// on the stack and subsequently the Key as an Access Opcode.
+fn member<'a>(
+    ctx: &mut Context,
+    container: &Box<Spanned<Ast>>,
+    key: &Box<Spanned<Ast>>,
+) -> Result<(Vec<u8>, Type), crate::error::Error<'a>> {
+    Ok((vec![], Type::Unknown))
+}
+
 /// Raw values get emitted into the bytecode as <usize length><bytes>.
 /// The value gets cached within our Context object and prepended to the
 /// final payload. That way, we only need to deserialize it once and can
@@ -115,23 +193,21 @@ fn value<'a>(ctx: &mut Context, value: &Value) -> Result<(Vec<u8>, Type), crate:
     value_bytecode.append(&mut bytes);
 
     let return_type = Type::from(value);
-
-    if ctx.values.contains(&value_bytecode) {
-        let idx = ctx
-            .values
-            .iter()
-            .position(|v| v == &value_bytecode)
-            .unwrap();
-        Ok((
-            vec![
-                vec![Op::GetValue as u8],
-                (idx as u16).to_ne_bytes().to_vec(),
-            ]
-            .concat(),
-            return_type,
-        ))
+    let bc = if let &Type::Function { .. } = &return_type {
+        let idx = ctx.cache_fn(value_bytecode);
+        vec![
+            vec![Op::GetFunction as u8],
+            (idx as u16).to_ne_bytes().to_vec(),
+        ]
+        .concat()
     } else {
-        ctx.values.push(value_bytecode.clone());
-        Ok((value_bytecode, return_type))
-    }
+        let idx = ctx.cache_value(value_bytecode);
+        vec![
+            vec![Op::GetValue as u8],
+            (idx as u16).to_ne_bytes().to_vec(),
+        ]
+        .concat()
+    };
+
+    Ok((bc, return_type))
 }

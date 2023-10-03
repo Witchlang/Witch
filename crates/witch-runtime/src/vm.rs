@@ -6,6 +6,7 @@ use crate::stack::{Entry, Stack};
 use crate::value::{Function, Value};
 
 #[repr(u8)]
+#[cfg_attr(debug_assertions, derive(Debug))]
 #[derive(Eq, PartialEq, Clone)]
 pub enum BinaryOp {
     Add,
@@ -30,12 +31,18 @@ impl core::convert::From<u8> for BinaryOp {
     }
 }
 
+#[cfg_attr(debug_assertions, derive(Debug))]
 #[derive(Serialize, Deserialize, PartialEq, Clone)]
 #[repr(u8)]
 pub enum Op {
-    Binary,
-    Push,
+    SetupValueCache,
+    SetupFunctionCache,
     GetValue,
+    GetFunction,
+    
+    Push,
+
+    Binary,
 
     Crash,
 }
@@ -43,9 +50,14 @@ pub enum Op {
 impl core::convert::From<u8> for Op {
     fn from(byte: u8) -> Self {
         match byte {
-            0 => Op::Binary,
-            1 => Op::Push,
+            0 => Op::SetupValueCache,
+            1 => Op::SetupFunctionCache,
             2 => Op::GetValue,
+            3 => Op::GetFunction,
+
+            4 => Op::Push,
+
+            5 => Op::Binary,
             _ => Op::Crash,
         }
     }
@@ -62,7 +74,7 @@ pub struct Vm {
     stack: Stack,
     frames: Vec<CallFrame>,
     functions: Vec<Function>,
-    cache: Stack,
+    cache: Vec<Value>,
 }
 
 impl Vm {
@@ -71,7 +83,7 @@ impl Vm {
             stack: Stack::new(),
             frames: vec![],
             functions: vec![],
-            cache: Stack::new(),
+            cache: vec![],
         }
     }
 
@@ -153,6 +165,9 @@ impl Vm {
                 execs
             );
         }
+
+        let result = self.run_frame(0);
+
         #[cfg(feature = "profile")]
         println!("{}", "-".repeat(59));
         #[cfg(feature = "profile")]
@@ -161,7 +176,9 @@ impl Vm {
             "Total (ms):",
             std::time::Duration::from_nanos(total_time_in_opcodes as u64).as_millis(),
         );
-        self.run_frame(0)
+
+        result
+        
     }
 
     /// Executes a particular call frame and any subsequent frames

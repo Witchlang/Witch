@@ -17,6 +17,7 @@ mod parser;
 use parser::parser;
 
 /// Ast describes the abstract syntax tree used for Witch.
+#[cfg_attr(debug_assertions, derive(Debug))]
 #[derive(Clone, PartialEq)]
 pub enum Ast {
     // Assigns an expression to a variable.

@@ -164,8 +164,8 @@ pub fn parser<'tokens: 'src, 'src: 'tokens>() -> impl Parser<
                 .boxed()
                 .labelled("block");
 
-            let fn_ = just(Token::Fn)
-                .ignore_then(typevar_decl.clone())
+            let fn_ = typevar_decl
+                .clone()
                 .or_not()
                 .then(
                     just(Token::Ctrl("("))
@@ -318,7 +318,7 @@ pub fn parser<'tokens: 'src, 'src: 'tokens>() -> impl Parser<
                     .allow_trailing()
                     .collect::<HashMap<String, Spanned<Ast>>>();
 
-                let fn_ = just(Token::Fn).ignore_then(typevar_decl.clone()).or_not().then(just(Token::Ctrl("("))
+                let fn_ = typevar_decl.clone().or_not().then(just(Token::Ctrl("("))
                     .ignore_then(
                         ident.then((just(Token::Ctrl(":")).ignore_then(type_assertion.clone())).or_not())
                             .separated_by(just(Token::Ctrl(",")))
