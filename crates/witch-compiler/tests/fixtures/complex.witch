@@ -1,0 +1,70 @@
+# This is a comment.
+/* 
+    And so is this, over
+    multiple lines.
+*/
+
+# Imports
+import witch/some_module
+import witch/list
+
+# Enums with generics
+enum Option<T> {
+    None,
+    Some(T),
+    X
+}
+
+# Interface
+interface Calc {
+    some_list: []String
+    add: (i32) -> i32
+}
+
+# Structs
+@todo
+struct Bar {
+
+    field: i32
+
+    # Add lets Bar implement Calc
+    function add(a: i32) -> i32 {
+        return a(55)
+    }
+}
+
+struct Foo {
+    maybe_bar: Option<Bar>
+}
+
+function new_foo<T>(maybe_bar: Option<T>) where T: Calc -> Foo {
+    Foo {
+        maybe_bar
+    }
+}
+
+let foo = new_foo(Option.Some(Bar { field: 5 }))
+
+let result = case foo.maybe_bar {
+    Some(bar) -> bar.add(10),
+    None -> 0
+}
+
+let some_number = result * 5 - 10 + 9999 + 9999 / 77777
+let some_list = [some_number, (function () -> 5)(), 15]
+
+# UFCS. map and filter are in the prelude and take I: Iterator
+let some_list2 = some_list
+    .map((i) -> i + 5)
+    .filter((i) -> i % 5)
+
+let res = send(some_list2)
+
+for i in some_list2 {
+    print(i)
+}
+
+loop {
+    print("Hello from the loop")
+    break
+}

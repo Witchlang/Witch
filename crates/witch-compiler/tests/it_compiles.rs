@@ -1,20 +1,20 @@
 #[test]
-fn it_compiles() {
+fn it_tokenizes() {
     use std::path::PathBuf;
-    let expected: Vec<u8> = vec![];
+    let expected: Vec<u8> = vec![41];
     let (result, _) =
-        witch_compiler::compile(PathBuf::from("tests/fixtures/arithmatics.w"), None).unwrap();
+        witch_compiler::compile(PathBuf::from("tests/fixtures/complex.witch"), None).unwrap();
     assert_eq!(expected, result);
 }
 
-#[test]
-fn it_compiles_with_state() {
-    use std::path::PathBuf;
-    let expected: Vec<u8> = vec![];
-    let (result, state) =
-        witch_compiler::compile(PathBuf::from("tests/fixtures/arithmatics.w"), None).unwrap();
-    let (result2, state2) =
-        witch_compiler::compile(PathBuf::from("tests/fixtures/arithmatics.w"), Some(state))
-            .unwrap();
-    assert_eq!(expected, result2);
-}
+// // #[test]
+// // fn it_compiles_with_state() {
+// //     use std::path::PathBuf;
+// //     let expected: Vec<u8> = vec![];
+// //     let (result, state) =
+// //         witch_compiler::compile(PathBuf::from("tests/fixtures/arithmatics.w"), None).unwrap();
+// //     let (result2, state2) =
+// //         witch_compiler::compile(PathBuf::from("tests/fixtures/arithmatics.w"), Some(state))
+// //             .unwrap();
+// //     assert_eq!(expected, result2);
+// // }

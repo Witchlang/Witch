@@ -39,7 +39,7 @@ pub enum Op {
     SetupFunctionCache,
     GetValue,
     GetFunction,
-    
+
     Push,
 
     Binary,
@@ -75,6 +75,12 @@ pub struct Vm {
     frames: Vec<CallFrame>,
     functions: Vec<Function>,
     cache: Vec<Value>,
+}
+
+impl Default for Vm {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Vm {
@@ -166,8 +172,6 @@ impl Vm {
             );
         }
 
-        let result = self.run_frame(0);
-
         #[cfg(feature = "profile")]
         println!("{}", "-".repeat(59));
         #[cfg(feature = "profile")]
@@ -177,8 +181,7 @@ impl Vm {
             std::time::Duration::from_nanos(total_time_in_opcodes as u64).as_millis(),
         );
 
-        result
-        
+        self.run_frame(0)
     }
 
     /// Executes a particular call frame and any subsequent frames
@@ -202,8 +205,8 @@ impl Vm {
             let opcode_timer_start = std::time::Instant::now();
 
             let op = Op::from(self.current_byte());
-            let mut offset = 0;
-            let mut forward = true;
+            let offset = 0;
+            let forward = true;
 
             #[cfg(feature = "profile")]
             let opcode_timer_start = std::time::Instant::now();

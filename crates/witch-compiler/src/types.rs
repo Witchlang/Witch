@@ -3,18 +3,21 @@ use core::mem::discriminant;
 use std::collections::HashMap;
 use witch_runtime::value::Value;
 
-use crate::ast::Ast;
+use crate::parser::ast::Ast;
 
 #[derive(PartialEq, Clone, Debug)]
 pub enum TypeDecl {
     Struct {
+        generics: HashMap<String, Type>,
         fields: HashMap<String, Type>,
         methods: Vec<(String, Ast)>,
     },
     Interface {
+        generics: HashMap<String, Type>,
         properties: HashMap<String, Type>,
     },
     Enum {
+        generics: HashMap<String, Type>,
         variants: Vec<EnumVariant>,
     },
 }
@@ -28,9 +31,8 @@ pub enum Index {
 #[derive(Debug, PartialEq, Clone)]
 pub struct EnumVariant {
     pub name: String,
-    pub discriminant: u32,
+    pub discriminant: usize,
     pub types: Option<Vec<Type>>,
-    pub generics: HashMap<String, Type>,
 }
 
 #[derive(Debug, Clone)]
@@ -144,10 +146,7 @@ pub enum Type {
     EnumVariant(EnumVariant),
 
     /// A variable referencing to a different type (generic or custom made)
-    TypeVar {
-        name: String,
-        inner_types: Vec<Type>,
-    },
+    TypeVar { name: String, inner: Vec<Type> },
 
     /// A variable referencing a Value
     Var(String),
@@ -290,8 +289,8 @@ impl From<&Value> for Type {
     fn from(value: &Value) -> Type {
         match value {
             Value::List(vec) => {
-                if vec.len() > 0 {
-                    Type::List(Box::new(Type::from(&vec[0])))
+                if !vec.is_empty() {
+                    Type::List(Box::new((&vec[0]).into()))
                 } else {
                     Type::List(Box::new(Type::Any))
                 }
@@ -302,8 +301,8 @@ impl From<&Value> for Type {
     }
 }
 
-impl From<&str> for Type {
-    fn from(str: &str) -> Type {
+impl Type {
+    pub fn from_str(str: &str, inner: Vec<Type>) -> Type {
         match &*str.to_lowercase() {
             "void" => Type::Void,
             "bool" => Type::Bool,
@@ -323,7 +322,7 @@ impl From<&str> for Type {
             "usize" => Type::Usize,
             _ => Type::TypeVar {
                 name: str.to_string(),
-                inner_types: vec![],
+                inner,
             },
         }
     }

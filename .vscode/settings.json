@@ -1,0 +1,6 @@
+{
+    "rust-analyzer.linkedProjects": [
+        "./crates/witch-compiler/Cargo.toml"
+    ],
+    "rust-analyzer.showUnlinkedFileNotification": false
+}
