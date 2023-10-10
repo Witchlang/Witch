@@ -5,14 +5,15 @@ use crate::parser::lexer::{Kind, Lexer};
 use crate::parser::ast::Ast;
 use crate::parser::r#type::{enum_declaration, interface_declaration, struct_declaration};
 
-use super::expression::{function_expression, inline_expression};
+use super::expression::{inline_expression, try_function_expression};
 use super::Parser;
 
 pub fn statement<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Ast {
     let start = p.cursor;
     match p.peek() {
-        Kind::KwImport => {
-            let token = p.tokens.next().unwrap();
+        Some(Kind::RBrace) => Ast::Nop,
+        Some(Kind::KwImport) => {
+            let token = p.consume(&Kind::KwImport);
             let stmt = Ast::Import {
                 path: Box::new(PathBuf::from(p.text(&token))),
                 span: token.span,
@@ -24,7 +25,7 @@ pub fn statement<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Ast {
                 span: start..end,
             }
         }
-        Kind::KwEnum => {
+        Some(Kind::KwEnum) => {
             let enum_decl = enum_declaration(p);
             let end = p.cursor;
             Ast::Statement {
@@ -33,7 +34,7 @@ pub fn statement<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Ast {
                 span: start..end,
             }
         }
-        Kind::KwInterface => {
+        Some(Kind::KwInterface) => {
             let interface_decl = interface_declaration(p);
             let end = p.cursor;
             Ast::Statement {
@@ -42,7 +43,7 @@ pub fn statement<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Ast {
                 span: start..end,
             }
         }
-        Kind::KwStruct => {
+        Some(Kind::KwStruct) => {
             let struct_decl = struct_declaration(p);
             let end = p.cursor;
             Ast::Statement {
@@ -51,15 +52,58 @@ pub fn statement<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Ast {
                 span: start..end,
             }
         }
-        Kind::KwReturn => {
+        Some(Kind::KwLet) => {
+            p.consume(&Kind::KwLet);
+            let (ident, expr) = assignment(p);
+            p.consume(&Kind::Semicolon);
+            let end = p.cursor;
+            let assignment = Ast::Let {
+                ident,
+                expr: Box::new(expr),
+                span: start..end,
+            };
+            Ast::Statement {
+                stmt: Box::new(assignment),
+                rest: Box::new(statement(p)),
+                span: start..end,
+            }
+        }
+        Some(Kind::KwReturn) => {
             p.consume(&Kind::KwReturn);
             let expr = Box::new(inline_expression(p));
+            if p.at(Kind::Semicolon) {
+                p.consume(&Kind::Semicolon);
+            }
             Ast::Return {
                 expr,
                 span: start..p.cursor,
             }
         }
-        Kind::At => annotation(p),
+        Some(Kind::KwFn) => {
+            let (ident, expr) = function_declaration(p);
+            let end = p.cursor;
+            let assignment = Ast::Let {
+                ident,
+                expr: Box::new(expr),
+                span: start..end,
+            };
+            Ast::Statement {
+                stmt: Box::new(assignment),
+                rest: Box::new(statement(p)),
+                span: start..end,
+            }
+        }
+        Some(Kind::At) => annotation(p),
+        Some(_) => {
+            let expr = inline_expression(p);
+            p.consume(&Kind::Semicolon);
+            let end = p.cursor;
+            Ast::Statement {
+                stmt: Box::new(expr),
+                rest: Box::new(statement(p)),
+                span: start..end,
+            }
+        }
         kind => {
             let token = p.tokens.next().unwrap();
             todo!(
@@ -70,6 +114,25 @@ pub fn statement<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Ast {
             )
         }
     }
+}
+
+fn assignment<'input>(p: &mut Parser<'input, Lexer<'input>>) -> (String, Ast) {
+    let start = p.cursor;
+    let token = p.consume(&Kind::Ident);
+    let ident = p.text(&token).to_string();
+
+    p.consume(&Kind::Eq);
+
+    let expr = Box::new(inline_expression(p));
+
+    (
+        ident.clone(),
+        Ast::Assignment {
+            ident,
+            expr,
+            span: start..p.cursor,
+        },
+    )
 }
 
 fn annotation<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Ast {
@@ -98,5 +161,8 @@ pub fn function_declaration<'input>(p: &mut Parser<'input, Lexer<'input>>) -> (S
     let token = p.consume(&Kind::Ident);
     let name = p.text(&token).to_string();
 
-    (name, function_expression(p))
+    (
+        name,
+        try_function_expression(p).unwrap_or_else(|| panic!("invalid function expression at {}", p.cursor)),
+    )
 }

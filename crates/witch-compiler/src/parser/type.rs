@@ -6,6 +6,7 @@ use crate::parser::ast::Ast;
 use crate::types::TypeDecl;
 use crate::types::{EnumVariant, Type};
 
+use super::expression::where_constraints;
 use super::statement::function_declaration;
 use super::Parser;
 /// A struct declaration:
@@ -30,7 +31,7 @@ pub fn struct_declaration<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Ast 
 
     // Possibly type variables
     // <T, U>
-    let type_vars = if let Kind::LAngle = p.peek() {
+    let type_vars = if let Some(Kind::LAngle) = p.peek() {
         p.consume(&Kind::LAngle);
         let vars = p.repeating(vec![], Kind::Ident, Some(Kind::Comma));
         p.consume(&Kind::RAngle);
@@ -58,7 +59,7 @@ pub fn struct_declaration<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Ast 
     // Start the block
     p.consume(&Kind::LBrace);
 
-    let fields = properties(p, HashMap::default());
+    let fields = properties(p, Kind::Semicolon, HashMap::default());
 
     let mut methods = vec![];
     while p.at(Kind::KwFn) {
@@ -97,7 +98,7 @@ pub fn interface_declaration<'input>(p: &mut Parser<'input, Lexer<'input>>) -> A
 
     // Possibly type variables
     // <T, U>
-    let type_vars = if let Kind::LAngle = p.peek() {
+    let type_vars = if let Some(Kind::LAngle) = p.peek() {
         p.consume(&Kind::LAngle);
         let vars = p.repeating(vec![], Kind::Ident, Some(Kind::Comma));
         p.consume(&Kind::RAngle);
@@ -125,7 +126,7 @@ pub fn interface_declaration<'input>(p: &mut Parser<'input, Lexer<'input>>) -> A
     // Start the block
     p.consume(&Kind::LBrace);
 
-    let properties = properties(p, HashMap::default());
+    let properties = properties(p, Kind::Semicolon, HashMap::default());
 
     // End block
     p.consume(&Kind::RBrace);
@@ -147,6 +148,7 @@ pub fn interface_declaration<'input>(p: &mut Parser<'input, Lexer<'input>>) -> A
 /// method: (i32, i32) -> i32
 pub fn properties<'input>(
     p: &mut Parser<'input, Lexer<'input>>,
+    separator: Kind,
     mut properties_: HashMap<String, Type>,
 ) -> HashMap<String, Type> {
     let token = p.consume(&Kind::Ident);
@@ -155,10 +157,10 @@ pub fn properties<'input>(
     let ty = type_literal(p);
     properties_.insert(name, ty);
     match p.peek() {
-        Kind::Semicolon => {
+        Some(next) if next == separator => {
             p.consume(&Kind::Semicolon);
             if p.at(Kind::Ident) {
-                properties(p, properties_)
+                properties(p, separator, properties_)
             } else {
                 properties_
             }
@@ -184,7 +186,7 @@ pub fn enum_declaration<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Ast {
 
     // Possibly type variables
     // <T, U>
-    let type_vars = if let Kind::LAngle = p.peek() {
+    let type_vars = if let Some(Kind::LAngle) = p.peek() {
         p.consume(&Kind::LAngle);
         let vars = p.repeating(vec![], Kind::Ident, Some(Kind::Comma));
         p.consume(&Kind::RAngle);
@@ -196,10 +198,7 @@ pub fn enum_declaration<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Ast {
     };
 
     // Possibly constraints for the type variables
-    let constraints = vec![];
-    if p.at(Kind::KwWhere) {
-        todo!("enum generic constraints not yet implemented");
-    }
+    let constraints = where_constraints(p);
 
     let mut generics = HashMap::default();
     for v in type_vars.into_iter() {
@@ -237,11 +236,11 @@ pub fn enum_declaration<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Ast {
 /// ```
 fn list_types<'input>(p: &mut Parser<'input, Lexer<'input>>, mut types: Vec<Type>) -> Vec<Type> {
     match p.peek() {
-        Kind::Comma => {
+        Some(Kind::Comma) => {
             p.consume(&Kind::Comma);
             list_types(p, types)
         }
-        Kind::Ident | Kind::LParen => {
+        Some(Kind::Ident | Kind::LParen) => {
             types.push(type_literal(p));
             types
         }
@@ -262,7 +261,7 @@ fn list_types<'input>(p: &mut Parser<'input, Lexer<'input>>, mut types: Vec<Type
 /// ```
 pub fn type_literal<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Type {
     let ty = match p.peek() {
-        Kind::Ident => {
+        Some(Kind::Ident) => {
             let token = p.consume(&Kind::Ident);
             let ident = p.text(&token);
             let mut inner = vec![];
@@ -275,12 +274,12 @@ pub fn type_literal<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Type {
 
             Type::from_str(ident, inner)
         }
-        Kind::LSquare => {
+        Some(Kind::LSquare) => {
             p.consume(&Kind::LSquare);
             p.consume(&Kind::RSquare);
             Type::List(Box::new(type_literal(p)))
         }
-        Kind::LParen | Kind::LAngle => function_signature(p),
+        Some(Kind::LParen | Kind::LAngle) => function_signature(p),
         _ => Type::Unknown,
     };
 
@@ -307,7 +306,7 @@ pub fn type_literal<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Type {
 /// () -> String
 /// ```
 fn function_signature<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Type {
-    let type_vars = if let Kind::LAngle = p.peek() {
+    let type_vars = if let Some(Kind::LAngle) = p.peek() {
         p.consume(&Kind::LAngle);
         let vars = p.repeating(vec![], Kind::Ident, Some(Kind::Comma));
         p.consume(&Kind::RAngle);
@@ -364,15 +363,15 @@ pub fn enum_variants<'input>(
     mut variants: Vec<EnumVariant>,
 ) -> Vec<EnumVariant> {
     match p.peek() {
-        Kind::Ident => {
-            let token = p.tokens.next().unwrap();
+        Some(Kind::Ident) => {
+            let token = p.consume(&Kind::Ident);
             let name = p.text(&token).to_string();
             match p.peek() {
-                Kind::Comma => {
+                Some(Kind::Comma) => {
                     p.consume(&Kind::Comma);
                     enum_variants(p, variants)
                 }
-                Kind::LParen => {
+                Some(Kind::LParen) => {
                     p.consume(&Kind::LParen);
                     let types = list_types(p, vec![]);
                     variants.push(EnumVariant {
@@ -386,7 +385,7 @@ pub fn enum_variants<'input>(
                 _ => variants,
             }
         }
-        Kind::Comma => {
+        Some(Kind::Comma) => {
             p.consume(&Kind::Comma);
             enum_variants(p, variants)
         }

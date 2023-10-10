@@ -22,7 +22,8 @@ pub enum Ast {
     // Assigns an expression to a variable.
     Assignment {
         ident: String,
-        expr: Box<Spanned<Self>>,
+        expr: Box<Self>,
+        span: Range<usize>,
     },
 
     // Imports a module by path
@@ -37,6 +38,7 @@ pub enum Ast {
         args: Vec<(String, Type)>,
         returns: Type,
         body: Box<Self>,
+        generics: HashMap<String, Type>,
     },
 
     // A value expression.
@@ -46,25 +48,28 @@ pub enum Ast {
     // an Assignment expression.
     Let {
         ident: String,
-        expr: Box<Spanned<Self>>,
+        expr: Box<Self>,
+        span: Range<usize>,
     },
 
     // A named or anonymous struct.
     // During actual struct expressions, like Foo { field: 1 },
     // no methods are available. These are declared in the type declaration.
     Struct {
-        name: Option<String>,
-        fields: HashMap<String, Spanned<Self>>,
+        ident: Option<String>,
+        fields: HashMap<String, Self>,
+        span: Range<usize>,
     },
 
     // Resolves a variable by name.
     Var(String),
 
-    // An access expression allows us to access entries within objects,
+    // A member access expression allows us to access entries within objects,
     // such as items in lists, functions in modules, variants in enums or fields in structs.
-    Access {
-        container: Box<Spanned<Self>>,
-        key: Box<Spanned<Self>>,
+    Member {
+        container: Box<Self>,
+        key: String,
+        span: Range<usize>,
     },
 
     // A return value to be put on the stack and return from the current scope.

@@ -8,11 +8,12 @@ use logos::Span;
 
 mod lexer;
 use lexer::Token;
-use witch_runtime::value::Value;
+
 
 use crate::types::Type;
 
 use self::{
+    ast::Ast,
     lexer::{Kind, Lexer},
     r#type::type_literal,
 };
@@ -20,6 +21,11 @@ pub mod ast;
 mod expression;
 mod statement;
 mod r#type;
+
+pub enum Error {
+    UnexpectedEOF,
+    UnexpectedToken(Kind, Kind, usize),
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Spanned<T>((T, Span));
@@ -30,16 +36,30 @@ where
 {
     input: &'input str,
     tokens: Peekable<I>,
+    read_count: usize,
     cursor: usize,
 }
 
 impl<'input> Parser<'input, Lexer<'input>> {
-    pub fn new(input: &'input str) -> Parser<'input, Lexer<'input>> {
-        Parser {
+    pub fn new(input: &'input str) -> Self {
+        Self {
             input,
             tokens: Lexer::new(input).peekable(),
+            read_count: 0,
             cursor: 0,
         }
+    }
+
+    pub fn fork(&mut self) -> Self {
+        let mut fork = Self {
+            input: self.input,
+            tokens: Lexer::new(self.input).peekable(),
+            read_count: self.read_count,
+            cursor: self.cursor,
+        };
+        let _ = fork.tokens.advance_by(self.read_count);
+        assert_eq!(&self.peek(), &fork.peek());
+        fork
     }
 
     /// Get the source text of a token.
@@ -48,17 +68,13 @@ impl<'input> Parser<'input, Lexer<'input>> {
     }
 
     /// Look-ahead one token and see what kind of token it is.
-    pub fn peek(&mut self) -> Kind {
-        self.tokens
-            .peek()
-            .unwrap_or_else(|| panic!("no new token found at {}", self.cursor))
-            .kind
-            .clone()
+    pub fn peek(&mut self) -> Option<Kind> {
+        self.tokens.peek().map(|t| t.kind.clone())
     }
 
     /// Checks whether the next token is of a given kind
     pub fn at(&mut self, kind: Kind) -> bool {
-        self.peek() == kind
+        self.peek() == Some(kind)
     }
 
     pub fn at_type_literal(&mut self) -> bool {
@@ -77,12 +93,27 @@ impl<'input> Parser<'input, Lexer<'input>> {
             )
         });
         assert_eq!(
-            &token.kind, expected,
-            "Expected to consume `{:?}`, but found `{:?}` at {}",
-            expected, token.kind, self.cursor
+            &token.kind,
+            expected,
+            "Expected to consume `{:?}`, but found `{:?}` at {}. around: {}",
+            expected,
+            token.kind,
+            self.cursor,
+            &self.input[self.cursor - 10..self.cursor + 10]
         );
         self.cursor = token.span.end;
+        self.read_count += 1;
         token
+    }
+
+    /// Move forward one token in the input and check
+    /// that we pass the kind of token we expect, but only if we know its there.
+    pub fn try_consume(&mut self, expected: &Kind) -> Option<Token> {
+        if self.at(expected.to_owned()) {
+            return Some(self.consume(expected));
+        }
+
+        None
     }
 
     pub fn file(&mut self) -> ast::Ast {
@@ -92,13 +123,13 @@ impl<'input> Parser<'input, Lexer<'input>> {
     /// Parses idents and forward slashes into a path
     fn path(&mut self, mut path: PathBuf) -> PathBuf {
         match self.peek() {
-            Kind::Ident => {
-                let token = self.tokens.next().unwrap();
+            Some(Kind::Ident) => {
+                let token = self.consume(&Kind::Ident);
                 let ident = self.text(&token);
                 path.push(ident);
                 self.path(path)
             }
-            Kind::Slash => {
+            Some(Kind::Slash) => {
                 self.consume(&Kind::Slash);
                 self.path(path)
             }
@@ -114,36 +145,40 @@ impl<'input> Parser<'input, Lexer<'input>> {
         separator: Option<Kind>,
     ) -> Vec<Token> {
         match (self.peek(), &separator) {
-            (kind, _) if kind == expected => {
-                tokens.push(self.tokens.next().unwrap());
+            (Some(kind), _) if kind == expected => {
+                tokens.push(self.consume(&kind));
                 self.repeating(tokens, expected, separator)
             }
-            (kind, Some(sep)) if &kind == sep => {
+            (Some(kind), Some(sep)) if &kind == sep => {
                 self.consume(&kind);
                 self.repeating(tokens, expected, separator)
             }
             _ => tokens,
         }
     }
+}
 
-    fn parse_expression(&mut self) -> ast::Ast {
-        match self.peek() {
-            lit @ Kind::String | lit @ Kind::Int | lit @ Kind::Float => {
-                let txt = {
-                    let token = self.tokens.next().unwrap();
-                    self.text(&token)
-                };
-
-                match lit {
-                    Kind::Int => ast::Ast::Value(Value::I32(txt.parse().expect("invalid int"))),
-                    Kind::Float => ast::Ast::Value(Value::F32(txt.parse().expect("invalid float"))),
-                    Kind::String => {
-                        ast::Ast::Value(Value::String(txt[1..(txt.len() - 1)].to_string()))
-                    }
-                    _ => unreachable!(),
-                }
-            }
-            _ => todo!(),
+pub fn either<'input>(
+    p: &mut Parser<'input, Lexer<'input>>,
+    choices: Vec<impl Fn(&mut Parser<'input, Lexer<'input>>) -> Option<Ast>>,
+) -> Ast {
+    for f in choices.into_iter() {
+        let mut fork = p.fork();
+        if let Some(ast) = f(&mut fork) {
+            *p = fork;
+            return ast;
         }
     }
+    panic!("expected one of the supplied choices to parse");
+}
+
+#[test]
+fn forked_parser() {
+    let mut p = Parser::new("some input, () = <> *");
+    p.consume(&Kind::Ident);
+    p.consume(&Kind::Ident);
+    p.consume(&Kind::Comma);
+    let mut fork = p.fork();
+
+    assert_eq!(p.peek(), fork.peek());
 }

@@ -1,3 +1,5 @@
+use std::iter::Peekable;
+
 use logos::{Logos, Span, SpannedIter};
 
 #[derive(Logos, Debug, Clone, PartialEq, Eq)]
@@ -115,6 +117,8 @@ pub enum Kind {
     KwContinue,
     #[token("return")]
     KwReturn,
+    #[token("yield")]
+    KwYield,
     #[regex(r"[ \t\f]+", logos::skip)]
     #[regex(r"/\*([^*]|\*+[^*/])*\*?")] // unclosed comments == end
     #[end]
@@ -128,20 +132,20 @@ pub struct Token {
 }
 
 pub struct Lexer<'input> {
-    lexer: SpannedIter<'input, Kind>,
+    lexer: Peekable<SpannedIter<'input, Kind>>,
     prev_kind: Option<Kind>,
 }
 
 impl<'input> Lexer<'input> {
     pub fn new(input: &'input str) -> Self {
         Self {
-            lexer: Kind::lexer(input).spanned(),
+            lexer: Kind::lexer(input).spanned().peekable(),
             prev_kind: None,
         }
     }
 
     /// Deduces whether we should do automatic semicolon insertion.
-    fn should_asi(&self) -> bool {
+    fn should_asi(&mut self) -> bool {
         matches!(
             self.prev_kind,
             Some(
@@ -152,8 +156,9 @@ impl<'input> Lexer<'input> {
                     | Kind::Int
                     | Kind::Float
                     | Kind::String
+                    | Kind::RParen
             )
-        )
+        ) && !matches!(&mut self.lexer.peek(), Some((Ok(Kind::Dot), _))) // Dont ASI between chained method calls
     }
 }
 
@@ -170,6 +175,7 @@ impl<'input> Iterator for Lexer<'input> {
             // For newlines, check if we should do automatic semicolon insertion.
             // If we shouldn't, discard the newline by skipping ahead.
             if matches!(kind, Kind::Newline) {
+                let should = self.should_asi();
                 if self.should_asi() {
                     self.prev_kind = Some(Kind::Semicolon);
                     return Some(Token {

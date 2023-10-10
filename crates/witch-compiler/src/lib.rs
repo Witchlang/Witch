@@ -5,6 +5,7 @@
 //! It exports the `compile` function, which either returns the final bytecode or
 //! an error which can be written to stderr.
 #![feature(type_alias_impl_trait)]
+#![feature(iter_advance_by)]
 
 use anyhow::{Context as AnyhowContext, Result};
 
@@ -19,10 +20,10 @@ mod parser;
 mod types;
 
 /// Takes a Witch source file and compiles it to bytecode, or returns `error::Error`.
-pub fn compile<'a>(file_path: PathBuf, _maybe_ctx: Option<Context>) -> Result<(Vec<u8>, Context)> {
+pub fn compile(file_path: PathBuf, _maybe_ctx: Option<Context>) -> Result<(Vec<u8>, Context)> {
     let (_root_path, source) = resolve_file(None, file_path)?;
     let mut parser = parser::Parser::new(&source);
-    parser.file();
+    let ast = parser.file();
 
     // let ast = ast::parse(file_path)?;
     // let mut ctx = maybe_ctx.unwrap_or_default();

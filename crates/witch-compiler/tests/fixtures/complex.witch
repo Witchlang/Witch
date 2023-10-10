@@ -28,30 +28,53 @@ struct Bar {
     field: i32
 
     # Add lets Bar implement Calc
-    function add(a: i32) -> i32 {
-        return a(55)
+    function add(a: ((i32) -> i32) -> i32) -> i32 {
+        return a((b: string, c) -> 55)
     }
 }
+
+
+function test() -> any {
+    run_thing()
+    let x = foo
+      .map()
+      .bar()
+    x
+}
+
 
 struct Foo {
     maybe_bar: Option<Bar>
 }
 
 function new_foo<T>(maybe_bar: Option<T>) where T: Calc -> Foo {
-    Foo {
+    return Foo {
         maybe_bar
     }
 }
 
+
 let foo = new_foo(Option.Some(Bar { field: 5 }))
 
-let result = case foo.maybe_bar {
-    Some(bar) -> bar.add(10),
-    None -> 0
+interface Iterator<T> {
+    next: () -> Option<T>
 }
 
+function map<I, T, U>(it: I<T>, f: (T) -> U) where I: Iterator -> I<U> {
+    for e in it {
+        yield f(e)
+    }
+}
+
+#let result = case foo.maybe_bar {
+#    Some(bar) -> bar.add(10),
+#    None -> 0
+#}
+
 let some_number = result * 5 - 10 + 9999 + 9999 / 77777
-let some_list = [some_number, (function () -> 5)(), 15]
+let some_list = [some_number, (() -> 5)(), 15]
+
+
 
 # UFCS. map and filter are in the prelude and take I: Iterator
 let some_list2 = some_list
