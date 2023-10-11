@@ -2,30 +2,24 @@
 //! It does so using recursive descent, by combining multiple small parsing functions into larger chains.
 //! Expression precendence is built using the Pratt parsing algorithm.
 
-use std::{iter::Peekable, path::PathBuf};
+use std::iter::Peekable;
 
 use logos::Span;
 
 mod lexer;
 use lexer::Token;
 
-
+use crate::error::{Error, Result};
 use crate::types::Type;
 
 use self::{
     ast::Ast,
     lexer::{Kind, Lexer},
-    r#type::type_literal,
 };
 pub mod ast;
 mod expression;
 mod statement;
 mod r#type;
-
-pub enum Error {
-    UnexpectedEOF,
-    UnexpectedToken(Kind, Kind, usize),
-}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Spanned<T>((T, Span));
@@ -77,64 +71,49 @@ impl<'input> Parser<'input, Lexer<'input>> {
         self.peek() == Some(kind)
     }
 
-    pub fn at_type_literal(&mut self) -> bool {
-        let forward_input = &self.input[self.cursor..];
-        let mut tmp = Self::new(forward_input);
-        !matches!(type_literal(&mut tmp), Type::Unknown)
-    }
+    // pub fn at_type_literal(&mut self) -> bool {
+    //     let forward_input = &self.input[self.cursor..];
+    //     let mut tmp = Self::new(forward_input);
+    //     !matches!(type_literal(&mut tmp)?, Type::Unknown)
+    // }
 
     /// Move forward one token in the input and check
     /// that we pass the kind of token we expect.
-    pub fn consume(&mut self, expected: &Kind) -> Token {
-        let token = self.tokens.next().unwrap_or_else(|| {
-            panic!(
-                "Expected to consume `{:?}`, but there was no next token",
-                expected
-            )
-        });
-        assert_eq!(
-            &token.kind,
-            expected,
-            "Expected to consume `{:?}`, but found `{:?}` at {}. around: {}",
-            expected,
-            token.kind,
-            self.cursor,
-            &self.input[self.cursor - 10..self.cursor + 10]
-        );
+    pub fn consume(&mut self, expected: &Kind) -> Result<Token> {
+        let token = self.tokens.next().ok_or(Error::new(
+            &format!("Unexpected end of input. Expected: {:?}", expected),
+            self.cursor..self.cursor,
+            self.input,
+        ))?;
+
+        if &token.kind != expected {
+            return Err(Error::new(
+                &format!(
+                    "Unexpected token. Expected {:?}, got {:?}",
+                    expected, token.kind
+                ),
+                self.cursor..self.cursor,
+                self.input,
+            ));
+        }
+
         self.cursor = token.span.end;
         self.read_count += 1;
-        token
+        Ok(token)
     }
 
-    /// Move forward one token in the input and check
-    /// that we pass the kind of token we expect, but only if we know its there.
-    pub fn try_consume(&mut self, expected: &Kind) -> Option<Token> {
-        if self.at(expected.to_owned()) {
-            return Some(self.consume(expected));
-        }
+    // /// Move forward one token in the input and check
+    // /// that we pass the kind of token we expect, but only if we know its there.
+    // pub fn try_consume(&mut self, expected: &Kind) -> Option<Token> {
+    //     if self.at(expected.to_owned()) {
+    //         return Some(self.consume(expected));
+    //     }
 
-        None
-    }
+    //     None
+    // }
 
-    pub fn file(&mut self) -> ast::Ast {
+    pub fn file(&mut self) -> Result<ast::Ast> {
         statement::statement(self)
-    }
-
-    /// Parses idents and forward slashes into a path
-    fn path(&mut self, mut path: PathBuf) -> PathBuf {
-        match self.peek() {
-            Some(Kind::Ident) => {
-                let token = self.consume(&Kind::Ident);
-                let ident = self.text(&token);
-                path.push(ident);
-                self.path(path)
-            }
-            Some(Kind::Slash) => {
-                self.consume(&Kind::Slash);
-                self.path(path)
-            }
-            _ => path,
-        }
     }
 
     /// Repeats a token until we peek something else. Optionally takes a separator between each repetition.
@@ -143,33 +122,63 @@ impl<'input> Parser<'input, Lexer<'input>> {
         mut tokens: Vec<Token>,
         expected: Kind,
         separator: Option<Kind>,
-    ) -> Vec<Token> {
+    ) -> Result<Vec<Token>> {
         match (self.peek(), &separator) {
             (Some(kind), _) if kind == expected => {
-                tokens.push(self.consume(&kind));
+                tokens.push(self.consume(&kind)?);
                 self.repeating(tokens, expected, separator)
             }
             (Some(kind), Some(sep)) if &kind == sep => {
                 self.consume(&kind);
                 self.repeating(tokens, expected, separator)
             }
-            _ => tokens,
+            _ => Ok(tokens),
         }
     }
 }
 
 pub fn either<'input>(
     p: &mut Parser<'input, Lexer<'input>>,
-    choices: Vec<impl Fn(&mut Parser<'input, Lexer<'input>>) -> Option<Ast>>,
-) -> Ast {
+    choices: Vec<impl Fn(&mut Parser<'input, Lexer<'input>>) -> Result<Ast>>,
+) -> Result<Ast> {
     for f in choices.into_iter() {
         let mut fork = p.fork();
-        if let Some(ast) = f(&mut fork) {
+        if let Ok(ast) = f(&mut fork) {
             *p = fork;
-            return ast;
+            return Ok(ast);
         }
     }
-    panic!("expected one of the supplied choices to parse");
+    Err(Error::new(
+        "expected one of the patterns to match",
+        p.cursor..p.cursor,
+        p.input,
+    ))
+}
+
+pub fn maybe_type<'input>(
+    p: &mut Parser<'input, Lexer<'input>>,
+    f: impl Fn(&mut Parser<'input, Lexer<'input>>) -> Result<Type>,
+) -> Result<Type> {
+    let mut fork = p.fork();
+    let res = f(&mut fork);
+    if let Ok(ast) = res {
+        *p = fork;
+        return Ok(ast);
+    }
+    res
+}
+
+pub fn maybe<'input, T>(
+    p: &mut Parser<'input, Lexer<'input>>,
+    f: impl Fn(&mut Parser<'input, Lexer<'input>>) -> Result<T>,
+) -> Result<T> {
+    let mut fork = p.fork();
+    let res = f(&mut fork);
+    if let Ok(ast) = res {
+        *p = fork;
+        return Ok(ast);
+    }
+    res
 }
 
 #[test]

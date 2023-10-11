@@ -8,7 +8,7 @@ use crate::value::{Function, Value};
 #[repr(u8)]
 #[cfg_attr(debug_assertions, derive(Debug))]
 #[derive(Eq, PartialEq, Clone)]
-pub enum BinaryOp {
+pub enum InfixOp {
     Add,
     Sub,
     Mul,
@@ -20,12 +20,14 @@ pub enum BinaryOp {
     Lte,
     Gt,
     Gte,
+    And,
+    Or,
 }
 
-impl core::convert::From<u8> for BinaryOp {
+impl core::convert::From<u8> for InfixOp {
     fn from(byte: u8) -> Self {
         match byte {
-            0 => BinaryOp::Add,
+            0 => InfixOp::Add,
             _ => todo!(),
         }
     }
@@ -214,11 +216,11 @@ impl Vm {
             // An offset to the instruction pointer, for when ops consume more bytes than 1
             match op {
                 Op::Binary => {
-                    let bin_op = BinaryOp::from(self.next_byte());
+                    let bin_op = InfixOp::from(self.next_byte());
                     let b = self.stack.pop().unwrap();
                     let a = self.stack.pop().unwrap();
                     let res = match (a, bin_op, b) {
-                        (Entry::Usize(a), BinaryOp::Add, Entry::Usize(b)) => Entry::Usize(a + b),
+                        (Entry::Usize(a), InfixOp::Add, Entry::Usize(b)) => Entry::Usize(a + b),
 
                         (_x, _op, _y) => {
                             todo!()

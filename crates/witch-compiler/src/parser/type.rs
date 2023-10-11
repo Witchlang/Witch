@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use crate::error::{Error, Result};
 use crate::parser::lexer::{Kind, Lexer};
 
 use crate::parser::ast::Ast;
@@ -21,19 +22,19 @@ use super::Parser;
 ///   }
 /// }
 /// ```
-pub fn struct_declaration<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Ast {
+pub fn struct_declaration<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<Ast> {
     let start = p.cursor;
-    p.consume(&Kind::KwStruct);
+    p.consume(&Kind::KwStruct)?;
 
     // Struct name
-    let token = p.consume(&Kind::Ident);
+    let token = p.consume(&Kind::Ident)?;
     let name = p.text(&token).to_string();
 
     // Possibly type variables
     // <T, U>
     let type_vars = if let Some(Kind::LAngle) = p.peek() {
         p.consume(&Kind::LAngle);
-        let vars = p.repeating(vec![], Kind::Ident, Some(Kind::Comma));
+        let vars = p.repeating(vec![], Kind::Ident, Some(Kind::Comma))?;
         p.consume(&Kind::RAngle);
         vars.iter()
             .map(|t| p.text(t).to_string())
@@ -57,19 +58,19 @@ pub fn struct_declaration<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Ast 
     }
 
     // Start the block
-    p.consume(&Kind::LBrace);
+    p.consume(&Kind::LBrace)?;
 
-    let fields = properties(p, Kind::Semicolon, HashMap::default());
+    let fields = properties(p, Kind::Semicolon, HashMap::default())?;
 
     let mut methods = vec![];
     while p.at(Kind::KwFn) {
-        methods.push(function_declaration(p));
+        methods.push(function_declaration(p)?);
     }
 
     // End block
-    p.consume(&Kind::RBrace);
+    p.consume(&Kind::RBrace)?;
 
-    Ast::Type {
+    Ok(Ast::Type {
         name,
         decl: TypeDecl::Struct {
             generics,
@@ -77,7 +78,7 @@ pub fn struct_declaration<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Ast 
             methods,
         },
         span: (start..p.cursor),
-    }
+    })
 }
 
 /// Parses an interface declaration:
@@ -88,20 +89,20 @@ pub fn struct_declaration<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Ast 
 ///   method: (String) -> i32;
 /// }
 /// ```
-pub fn interface_declaration<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Ast {
+pub fn interface_declaration<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<Ast> {
     let start = p.cursor;
-    p.consume(&Kind::KwInterface);
+    p.consume(&Kind::KwInterface)?;
 
     // Interface name
-    let token = p.consume(&Kind::Ident);
+    let token = p.consume(&Kind::Ident)?;
     let name = p.text(&token).to_string();
 
     // Possibly type variables
     // <T, U>
     let type_vars = if let Some(Kind::LAngle) = p.peek() {
-        p.consume(&Kind::LAngle);
-        let vars = p.repeating(vec![], Kind::Ident, Some(Kind::Comma));
-        p.consume(&Kind::RAngle);
+        p.consume(&Kind::LAngle)?;
+        let vars = p.repeating(vec![], Kind::Ident, Some(Kind::Comma))?;
+        p.consume(&Kind::RAngle)?;
         vars.iter()
             .map(|t| p.text(t).to_string())
             .collect::<Vec<String>>()
@@ -124,21 +125,21 @@ pub fn interface_declaration<'input>(p: &mut Parser<'input, Lexer<'input>>) -> A
     }
 
     // Start the block
-    p.consume(&Kind::LBrace);
+    p.consume(&Kind::LBrace)?;
 
-    let properties = properties(p, Kind::Semicolon, HashMap::default());
+    let properties = properties(p, Kind::Semicolon, HashMap::default())?;
 
     // End block
-    p.consume(&Kind::RBrace);
+    p.consume(&Kind::RBrace)?;
 
-    Ast::Type {
+    Ok(Ast::Type {
         name,
         decl: TypeDecl::Interface {
             generics,
             properties,
         },
         span: (start..p.cursor),
-    }
+    })
 }
 
 /// A list of Ident -> Type bindings.
@@ -150,23 +151,24 @@ pub fn properties<'input>(
     p: &mut Parser<'input, Lexer<'input>>,
     separator: Kind,
     mut properties_: HashMap<String, Type>,
-) -> HashMap<String, Type> {
-    let token = p.consume(&Kind::Ident);
+) -> Result<HashMap<String, Type>> {
+    let token = p.consume(&Kind::Ident)?;
     let name = p.text(&token).to_string();
-    p.consume(&Kind::Colon);
-    let ty = type_literal(p);
+    p.consume(&Kind::Colon)?;
+    let ty = type_literal(p)?;
     properties_.insert(name, ty);
-    match p.peek() {
+    let res = match p.peek() {
         Some(next) if next == separator => {
-            p.consume(&Kind::Semicolon);
+            p.consume(&Kind::Semicolon)?;
             if p.at(Kind::Ident) {
-                properties(p, separator, properties_)
+                properties(p, separator, properties_)?
             } else {
                 properties_
             }
         }
         _ => properties_,
-    }
+    };
+    Ok(res)
 }
 
 /// Parses an enum declaration:
@@ -176,19 +178,19 @@ pub fn properties<'input>(
 ///   Three(U)
 /// }
 ///
-pub fn enum_declaration<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Ast {
+pub fn enum_declaration<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<Ast> {
     let start = p.cursor;
-    p.consume(&Kind::KwEnum);
+    p.consume(&Kind::KwEnum)?;
 
     // Enum name
-    let token = p.consume(&Kind::Ident);
+    let token = p.consume(&Kind::Ident)?;
     let name = p.text(&token).to_string();
 
     // Possibly type variables
     // <T, U>
     let type_vars = if let Some(Kind::LAngle) = p.peek() {
         p.consume(&Kind::LAngle);
-        let vars = p.repeating(vec![], Kind::Ident, Some(Kind::Comma));
+        let vars = p.repeating(vec![], Kind::Ident, Some(Kind::Comma))?;
         p.consume(&Kind::RAngle);
         vars.iter()
             .map(|t| p.text(t).to_string())
@@ -198,7 +200,7 @@ pub fn enum_declaration<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Ast {
     };
 
     // Possibly constraints for the type variables
-    let constraints = where_constraints(p);
+    let constraints = where_constraints(p)?;
 
     let mut generics = HashMap::default();
     for v in type_vars.into_iter() {
@@ -209,24 +211,24 @@ pub fn enum_declaration<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Ast {
     }
 
     // Start the block
-    p.consume(&Kind::LBrace);
+    p.consume(&Kind::LBrace)?;
 
     // List variants
-    let variants = enum_variants(p, vec![]);
+    let variants = enum_variants(p, vec![])?;
 
     // Last variant may have an automatic semicolon. Disregard it.
     if p.at(Kind::Semicolon) {
-        p.consume(&Kind::Semicolon);
+        p.consume(&Kind::Semicolon)?;
     }
 
     // End block
-    p.consume(&Kind::RBrace);
+    p.consume(&Kind::RBrace)?;
 
-    Ast::Type {
+    Ok(Ast::Type {
         name,
         decl: TypeDecl::Enum { generics, variants },
         span: (start..p.cursor),
-    }
+    })
 }
 
 /// A comma-separated list of types.
@@ -234,18 +236,22 @@ pub fn enum_declaration<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Ast {
 /// ```no
 /// T, Foo<Bar<Baz>>, i32, List<String>
 /// ```
-fn list_types<'input>(p: &mut Parser<'input, Lexer<'input>>, mut types: Vec<Type>) -> Vec<Type> {
-    match p.peek() {
+fn list_types<'input>(
+    p: &mut Parser<'input, Lexer<'input>>,
+    mut types: Vec<Type>,
+) -> Result<Vec<Type>> {
+    let types = match p.peek() {
         Some(Kind::Comma) => {
-            p.consume(&Kind::Comma);
-            list_types(p, types)
+            p.consume(&Kind::Comma)?;
+            list_types(p, types)?
         }
         Some(Kind::Ident | Kind::LParen) => {
-            types.push(type_literal(p));
+            types.push(type_literal(p)?);
             types
         }
         _ => types,
-    }
+    };
+    Ok(types)
 }
 
 /// A single type literal.
@@ -259,44 +265,50 @@ fn list_types<'input>(p: &mut Parser<'input, Lexer<'input>>, mut types: Vec<Type
 /// Foo<Bar<Baz>, i32>
 /// Iterator + SomeInterface
 /// ```
-pub fn type_literal<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Type {
+pub fn type_literal<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<Type> {
     let ty = match p.peek() {
         Some(Kind::Ident) => {
-            let token = p.consume(&Kind::Ident);
+            let token = p.consume(&Kind::Ident)?;
             let ident = p.text(&token);
             let mut inner = vec![];
 
             if p.at(Kind::LAngle) {
-                p.consume(&Kind::LAngle);
-                inner = list_types(p, inner);
-                p.consume(&Kind::RAngle);
+                p.consume(&Kind::LAngle)?;
+                inner = list_types(p, inner)?;
+                p.consume(&Kind::RAngle)?;
             }
 
             Type::from_str(ident, inner)
         }
         Some(Kind::LSquare) => {
-            p.consume(&Kind::LSquare);
-            p.consume(&Kind::RSquare);
-            Type::List(Box::new(type_literal(p)))
+            p.consume(&Kind::LSquare)?;
+            p.consume(&Kind::RSquare)?;
+            Type::List(Box::new(type_literal(p)?))
         }
-        Some(Kind::LParen | Kind::LAngle) => function_signature(p),
-        _ => Type::Unknown,
+        Some(Kind::LParen | Kind::LAngle) => function_signature(p)?,
+        kind => {
+            return Err(Error::new(
+                &format!("Unknown type error. Expected type literal, got: {:?}", kind),
+                p.cursor..p.cursor,
+                p.input,
+            ))
+        }
     };
 
     // If we encounter a plus sign, its an Intersection type.
     // We recursively flatten it to a topmost Intersection.
     if p.at(Kind::Plus) {
-        p.consume(&Kind::Plus);
+        p.consume(&Kind::Plus)?;
         let mut types = vec![ty];
-        match type_literal(p) {
+        match type_literal(p)? {
             Type::Intersection(ref mut t) => {
                 types.append(t);
             }
             t => types.push(t),
         }
-        return Type::Intersection(types);
+        return Ok(Type::Intersection(types));
     }
-    ty
+    Ok(ty)
 }
 
 /// A function signature.
@@ -305,11 +317,11 @@ pub fn type_literal<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Type {
 /// <I>(string, I, i32...) where I: Iterator -> void
 /// () -> String
 /// ```
-fn function_signature<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Type {
+fn function_signature<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<Type> {
     let type_vars = if let Some(Kind::LAngle) = p.peek() {
-        p.consume(&Kind::LAngle);
-        let vars = p.repeating(vec![], Kind::Ident, Some(Kind::Comma));
-        p.consume(&Kind::RAngle);
+        p.consume(&Kind::LAngle)?;
+        let vars = p.repeating(vec![], Kind::Ident, Some(Kind::Comma))?;
+        p.consume(&Kind::RAngle)?;
         vars.iter()
             .map(|t| p.text(t).to_string())
             .collect::<Vec<String>>()
@@ -317,17 +329,17 @@ fn function_signature<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Type {
         vec![]
     };
 
-    p.consume(&Kind::LParen);
-    let args = list_types(p, vec![]);
+    p.consume(&Kind::LParen)?;
+    let args = list_types(p, vec![])?;
     let mut is_variadic = false;
     if p.at(Kind::DotDotDot) {
-        p.consume(&Kind::DotDotDot);
+        p.consume(&Kind::DotDotDot)?;
         is_variadic = true;
     }
 
-    p.consume(&Kind::RParen);
-    p.consume(&Kind::Arrow);
-    let returns = Box::new(type_literal(p));
+    p.consume(&Kind::RParen)?;
+    p.consume(&Kind::Arrow)?;
+    let returns = Box::new(type_literal(p)?);
 
     // Possibly constraints for the type variables
     let constraints = vec![];
@@ -343,12 +355,12 @@ fn function_signature<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Type {
         generics.entry(k).and_modify(|e| *e = v);
     }
 
-    Type::Function {
+    Ok(Type::Function {
         args,
         returns,
         is_variadic,
         generics,
-    }
+    })
 }
 
 /// Parses a comma separated list of enum variants. Allows trailing comma.
@@ -361,34 +373,34 @@ fn function_signature<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Type {
 pub fn enum_variants<'input>(
     p: &mut Parser<'input, Lexer<'input>>,
     mut variants: Vec<EnumVariant>,
-) -> Vec<EnumVariant> {
+) -> Result<Vec<EnumVariant>> {
     match p.peek() {
         Some(Kind::Ident) => {
-            let token = p.consume(&Kind::Ident);
+            let token = p.consume(&Kind::Ident)?;
             let name = p.text(&token).to_string();
             match p.peek() {
                 Some(Kind::Comma) => {
-                    p.consume(&Kind::Comma);
+                    p.consume(&Kind::Comma)?;
                     enum_variants(p, variants)
                 }
                 Some(Kind::LParen) => {
-                    p.consume(&Kind::LParen);
-                    let types = list_types(p, vec![]);
+                    p.consume(&Kind::LParen)?;
+                    let types = list_types(p, vec![])?;
                     variants.push(EnumVariant {
                         name,
                         discriminant: variants.len(),
                         types: Some(types),
                     });
-                    p.consume(&Kind::RParen);
+                    p.consume(&Kind::RParen)?;
                     enum_variants(p, variants)
                 }
-                _ => variants,
+                _ => Ok(variants),
             }
         }
         Some(Kind::Comma) => {
-            p.consume(&Kind::Comma);
+            p.consume(&Kind::Comma)?;
             enum_variants(p, variants)
         }
-        _ => variants,
+        _ => Ok(variants),
     }
 }

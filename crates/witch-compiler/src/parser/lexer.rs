@@ -17,6 +17,8 @@ pub enum Kind {
     Semicolon,
     #[token("@")]
     At,
+    #[token("%")]
+    Percent,
     #[token("+")]
     Plus,
     #[token("-")]
@@ -46,9 +48,9 @@ pub enum Kind {
     #[token("!=")]
     Neq,
     #[token("<=")]
-    Leq,
+    Lte,
     #[token(">=")]
-    Geq,
+    Gte,
     #[token("_")]
     Under,
     #[token("->")]
@@ -175,7 +177,7 @@ impl<'input> Iterator for Lexer<'input> {
             // For newlines, check if we should do automatic semicolon insertion.
             // If we shouldn't, discard the newline by skipping ahead.
             if matches!(kind, Kind::Newline) {
-                let should = self.should_asi();
+                let _should = self.should_asi();
                 if self.should_asi() {
                     self.prev_kind = Some(Kind::Semicolon);
                     return Some(Token {

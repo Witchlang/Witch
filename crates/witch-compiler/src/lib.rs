@@ -6,6 +6,7 @@
 //! an error which can be written to stderr.
 #![feature(type_alias_impl_trait)]
 #![feature(iter_advance_by)]
+#![feature(assert_matches)]
 
 use anyhow::{Context as AnyhowContext, Result};
 
@@ -16,6 +17,7 @@ use std::{
 
 type Context = i32; //dummy
 
+mod error;
 mod parser;
 mod types;
 
@@ -23,7 +25,7 @@ mod types;
 pub fn compile(file_path: PathBuf, _maybe_ctx: Option<Context>) -> Result<(Vec<u8>, Context)> {
     let (_root_path, source) = resolve_file(None, file_path)?;
     let mut parser = parser::Parser::new(&source);
-    let ast = parser.file();
+    let _ast = parser.file();
 
     // let ast = ast::parse(file_path)?;
     // let mut ctx = maybe_ctx.unwrap_or_default();

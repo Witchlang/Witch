@@ -1,6 +1,6 @@
 use std::{collections::HashMap, ops::Range, path::PathBuf};
 
-use witch_runtime::{value::Value, vm::BinaryOp};
+use witch_runtime::{value::Value, vm::InfixOp};
 
 use crate::types::{Type, TypeDecl};
 
@@ -80,13 +80,17 @@ pub enum Ast {
 
     // Resolves a list of expressions, e.g.
     // [1, 2, (1+2), get4()]
-    List(Vec<Spanned<Self>>),
+    List {
+        items: Vec<Self>,
+        span: Range<usize>,
+    },
 
     // Expresses a binary operation, such as 1 <op> 1.
-    BinaryOperation {
-        a: Box<Spanned<Self>>,
-        op: BinaryOp,
-        b: Box<Spanned<Self>>,
+    Infix {
+        lhs: Box<Self>,
+        op: InfixOp,
+        rhs: Box<Self>,
+        span: Range<usize>,
     },
 
     /// Calls a function expresion with the provided values as arguments.
