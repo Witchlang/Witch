@@ -1,4 +1,4 @@
-use crate::error::{Result};
+use crate::error::Result;
 use crate::types::Type;
 use std::collections::HashMap;
 use witch_runtime::value::Value;
@@ -51,7 +51,6 @@ pub fn expression_inner<'input>(
                     span: start..p.cursor,
                 }
             } else {
-                
                 Ast::Var(ident)
             }
         }

@@ -8,31 +8,31 @@
 #![feature(iter_advance_by)]
 #![feature(assert_matches)]
 
-use anyhow::{Context as AnyhowContext, Result};
+use anyhow::Context as AContext;
+use anyhow::Result;
+use compiler::Context;
 
 use std::{
     env::current_dir,
     path::{Path, PathBuf},
 };
 
-type Context = i32; //dummy
-
+mod compiler;
 mod error;
 mod parser;
 mod types;
 
 /// Takes a Witch source file and compiles it to bytecode, or returns `error::Error`.
-pub fn compile(file_path: PathBuf, _maybe_ctx: Option<Context>) -> Result<(Vec<u8>, Context)> {
+pub fn compile(file_path: PathBuf, maybe_ctx: Option<Context>) -> Result<(Vec<u8>, Context)> {
     let (_root_path, source) = resolve_file(None, file_path)?;
     let mut parser = parser::Parser::new(&source);
-    let _ast = parser.file();
+    let ast = parser.file().unwrap();
 
-    // let ast = ast::parse(file_path)?;
-    // let mut ctx = maybe_ctx.unwrap_or_default();
-    // let (bc, _) = compiler::compile(&mut ctx, &ast)?;
+    let mut ctx = maybe_ctx.unwrap_or_default();
+    let (bc, _) = compiler::compile(&mut ctx, &ast).unwrap();
     // let prelude = ctx.flush();
     // Ok(([prelude, bc].concat(), ctx))
-    Ok((vec![], 0))
+    Ok((bc, ctx))
 }
 
 /// Canonicalizes a file path from our `start_path`, returning the new path as well as the file contents.

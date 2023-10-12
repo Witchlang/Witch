@@ -1,9 +1,9 @@
 //! The compiler module takes an AST representation of our program and
 //! emits bytecode from it.
 mod util;
-use crate::ast::{Ast, Spanned};
+use crate::error::Result;
+use crate::parser::ast::{Ast, Operator};
 use crate::types::Type;
-use witch_runtime::vm::BinaryOp;
 use witch_runtime::{value::Value, vm::Op};
 
 /// Contains all compile-time information about a locally scoped
@@ -34,7 +34,7 @@ pub struct Context {
 
     /// Lineage is a straight line of parent relationships from the current
     /// `compile` iteration up the the root node.
-    pub lineage: Vec<Spanned<Ast>>,
+    pub lineage: Vec<Ast>,
 
     /// Values get cached in order keep the subsequent programs smaller
     pub functions_cache: Vec<Cached>,
@@ -70,7 +70,7 @@ impl Context {
         bc.push(Op::SetupFunctionCache as u8);
         let len: [u8; std::mem::size_of::<usize>()] = len.to_ne_bytes();
         bc.append(&mut len.to_vec());
-        return bc;
+        bc
     }
 
     /// Adds a value bytecode to the cache, unless it has already been cached
@@ -82,13 +82,13 @@ impl Context {
             .iter()
             .position(|cached| &cached.bytecode == &value_bytecode)
         {
-            return idx;
+            idx
         } else {
             self.value_cache.push(Cached {
                 bytecode: value_bytecode,
                 flushed: false,
             });
-            return self.value_cache.len();
+            self.value_cache.len()
         }
     }
 
@@ -101,27 +101,24 @@ impl Context {
             .iter()
             .position(|cached| &cached.bytecode == &fn_bytecode)
         {
-            return idx;
+            idx
         } else {
             self.functions_cache.push(Cached {
                 bytecode: fn_bytecode,
                 flushed: false,
             });
-            return self.functions_cache.len();
+            self.functions_cache.len()
         }
     }
 }
 
 /// Turns an AST into bytecode
-pub fn compile<'a>(
-    ctx: &mut Context,
-    ast: &Spanned<Ast>,
-) -> Result<(Vec<u8>, Type), crate::error::Error<'a>> {
+pub fn compile<'a>(ctx: &mut Context, ast: &Ast) -> Result<(Vec<u8>, Type)> {
     ctx.lineage.push(ast.clone());
 
-    let (bytecode, return_type) = match &ast.0 {
+    let (bytecode, return_type) = match &ast {
         // Ast::Assignment { ident, expr } => assignment(ctx, ident, expr)?,
-        Ast::BinaryOperation { a, op, b } => binary_operation(ctx, a, op, b)?,
+        Ast::Infix { lhs, op, rhs, .. } => binary_operation(ctx, lhs, op, rhs)?,
         //  Ast::Member { container, key } => member(ctx, container, key)?,
         Ast::Value(v) => value(ctx, v)?,
         x => todo!("{:?}", x),
@@ -132,11 +129,7 @@ pub fn compile<'a>(
 
 /// Assigns a local variable by setting its new value without initializing it.
 /// It needs to either be mutable or the parent expr needs to be `Ast::Let`.
-fn assignment<'a>(
-    ctx: &mut Context,
-    ident: &str,
-    expr: &Box<Spanned<Ast>>,
-) -> Result<(Vec<u8>, Type), crate::error::Error<'a>> {
+fn assignment<'a>(_ctx: &mut Context, _ident: &str, _expr: &Box<Ast>) -> Result<(Vec<u8>, Type)> {
     Ok((vec![], Type::Unknown))
 }
 
@@ -144,12 +137,12 @@ fn assignment<'a>(
 /// Requres the two expressions to be of the same type.
 fn binary_operation<'a>(
     ctx: &mut Context,
-    a: &Box<Spanned<Ast>>,
-    op: &BinaryOp,
-    b: &Box<Spanned<Ast>>,
-) -> Result<(Vec<u8>, Type), crate::error::Error<'a>> {
-    let (mut bytecode, a_type) = compile(ctx, &a)?;
-    let (mut bytecode_b, b_type) = compile(ctx, &b)?;
+    a: &Box<Ast>,
+    op: &Operator,
+    b: &Box<Ast>,
+) -> Result<(Vec<u8>, Type)> {
+    let (mut bytecode, a_type) = compile(ctx, a)?;
+    let (mut bytecode_b, b_type) = compile(ctx, b)?;
 
     // Type check and set our return type for this expression.
     // If either branch is of Unknown type, we will infer them to be the same.
@@ -157,7 +150,7 @@ fn binary_operation<'a>(
         (x, y) if x != y => {
             panic!(
                 "cant perform binary op or comparison on different types: {:?} != {:?}, expr: {:?}, {:?}",
-                &a_type, &b_type, &a.0, &b.0
+                &a_type, &b_type, &a, &b
             );
         }
         (x, _) => x.to_owned(),
@@ -172,11 +165,7 @@ fn binary_operation<'a>(
 
 /// Accesses a member within an Object or Vector, by first putting the backing Object
 /// on the stack and subsequently the Key as an Access Opcode.
-fn member<'a>(
-    ctx: &mut Context,
-    container: &Box<Spanned<Ast>>,
-    key: &Box<Spanned<Ast>>,
-) -> Result<(Vec<u8>, Type), crate::error::Error<'a>> {
+fn member(_ctx: &mut Context, _container: &Box<Ast>, _key: &Box<Ast>) -> Result<(Vec<u8>, Type)> {
     Ok((vec![], Type::Unknown))
 }
 
@@ -184,7 +173,7 @@ fn member<'a>(
 /// The value gets cached within our Context object and prepended to the
 /// final payload. That way, we only need to deserialize it once and can
 /// keep on referencing its index within the stack instead.
-fn value<'a>(ctx: &mut Context, value: &Value) -> Result<(Vec<u8>, Type), crate::error::Error<'a>> {
+fn value(ctx: &mut Context, value: &Value) -> Result<(Vec<u8>, Type)> {
     let mut value_bytecode = vec![];
     let mut bytes = util::serialize_value(value.clone())?;
     let length: [u8; std::mem::size_of::<usize>()] = bytes.len().to_ne_bytes();
@@ -195,17 +184,13 @@ fn value<'a>(ctx: &mut Context, value: &Value) -> Result<(Vec<u8>, Type), crate:
     let return_type = Type::from(value);
     let bc = if let &Type::Function { .. } = &return_type {
         let idx = ctx.cache_fn(value_bytecode);
-        vec![
-            vec![Op::GetFunction as u8],
-            (idx as u16).to_ne_bytes().to_vec(),
-        ]
+        [vec![Op::GetFunction as u8],
+            (idx as u16).to_ne_bytes().to_vec()]
         .concat()
     } else {
         let idx = ctx.cache_value(value_bytecode);
-        vec![
-            vec![Op::GetValue as u8],
-            (idx as u16).to_ne_bytes().to_vec(),
-        ]
+        [vec![Op::GetValue as u8],
+            (idx as u16).to_ne_bytes().to_vec()]
         .concat()
     };
 
