@@ -8,7 +8,7 @@ use super::Spanned;
 
 #[repr(u8)]
 #[derive(Debug, Eq, PartialEq, Clone)]
-pub enum InfixOp {
+pub enum Operator {
     Add,
     Sub,
     Mul,
@@ -22,6 +22,40 @@ pub enum InfixOp {
     Gte,
     And,
     Or,
+    Bang,
+    Pow,
+}
+
+impl Operator {
+    pub fn prefix_binding(&self) -> ((), u8) {
+        match self {
+            Operator::Add | Operator::Sub | Operator::Bang => ((), 51),
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn infix_binding(&self) -> Option<(u8, u8)> {
+        let result = match self {
+            Operator::Or => (1, 2),
+            Operator::And => (3, 4),
+            Operator::Eq | Operator::NotEq => (5, 6),
+            Operator::Lt | Operator::Lte | Operator::Gt | Operator::Gte => (7, 8),
+            Operator::Add | Operator::Sub => (9, 10),
+            Operator::Mul | Operator::Div | Operator::Mod => (11, 12),
+            Operator::Pow => (22, 21),
+            Operator::Bang => {
+                return None;
+            }
+        };
+        Some(result)
+    }
+
+    pub fn postfix_binding(&self) -> Option<(u8, ())> {
+        if let Operator::Bang = self {
+            return Some((101, ()));
+        }
+        None
+    }
 }
 
 /// Ast describes the abstract syntax tree used for Witch.
@@ -106,7 +140,7 @@ pub enum Ast {
     // Expresses a binary operation, such as 1 <op> 1.
     Infix {
         lhs: Box<Self>,
-        op: InfixOp,
+        op: Operator,
         rhs: Box<Self>,
         span: Range<usize>,
     },

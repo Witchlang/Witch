@@ -1,19 +1,25 @@
-use crate::error::{Error, Result};
+use crate::error::{Result};
 use crate::types::Type;
 use std::collections::HashMap;
 use witch_runtime::value::Value;
 
 use super::{
-    ast::{Ast, InfixOp},
+    ast::{Ast, Operator},
     either,
     lexer::{Kind, Lexer},
-    maybe,
     r#type::{properties, type_literal},
     statement::statement,
     Parser,
 };
 
 pub fn expression<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<Ast> {
+    expression_inner(p, 0)
+}
+
+pub fn expression_inner<'input>(
+    p: &mut Parser<'input, Lexer<'input>>,
+    binding_power: u8,
+) -> Result<Ast> {
     let start = p.cursor;
     let mut expr = match p.peek() {
         Some(lit @ Kind::Int) | Some(lit @ Kind::String) | Some(lit @ Kind::Float) => {
@@ -45,8 +51,8 @@ pub fn expression<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<Ast> 
                     span: start..p.cursor,
                 }
             } else {
-                let var = Ast::Var(ident);
-                var
+                
+                Ast::Var(ident)
             }
         }
         Some(Kind::LParen) => {
@@ -71,83 +77,55 @@ pub fn expression<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<Ast> 
 
     expr = member_or_func_call(p, expr)?;
 
-    if let Ok(op) = maybe(p, infix_operator) {
-        let end = p.cursor;
-        expr = Ast::Infix {
-            lhs: Box::new(expr),
-            op,
-            rhs: Box::new(expression(p)?),
-            span: start..end,
+    loop {
+        if let Some((op, kind)) = peek_operator(p) {
+            if let Some((left_binding, right_binding)) = op.infix_binding() {
+                // Previous operator binds us more than the upcoming one.
+                // We break in order to be associated with the previous op instead.
+                if left_binding < binding_power {
+                    break;
+                }
+
+                p.consume(&kind)?;
+                let end = p.cursor;
+                expr = Ast::Infix {
+                    lhs: Box::new(expr),
+                    op,
+                    rhs: Box::new(expression_inner(p, right_binding)?),
+                    span: start..end,
+                };
+                continue;
+            }
         }
+        break;
     }
 
     Ok(expr)
 }
 
-pub fn infix_operator<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<InfixOp> {
-    let start = p.cursor;
-    let op = match p.peek() {
-        Some(kind @ Kind::Eqq) => {
-            p.consume(&kind)?;
-            InfixOp::Eq
-        }
-        Some(kind @ Kind::Neq) => {
-            p.consume(&kind)?;
-            InfixOp::NotEq
-        }
-        Some(kind @ Kind::RAngle) => {
-            p.consume(&kind)?;
-            InfixOp::Gt
-        }
-        Some(kind @ Kind::LAngle) => {
-            p.consume(&kind)?;
-            InfixOp::Lt
-        }
-        Some(kind @ Kind::Gte) => {
-            p.consume(&kind)?;
-            InfixOp::Gte
-        }
-        Some(kind @ Kind::Lte) => {
-            p.consume(&kind)?;
-            InfixOp::Lte
-        }
-        Some(kind @ Kind::Plus) => {
-            p.consume(&kind)?;
-            InfixOp::Add
-        }
-        Some(kind @ Kind::Minus) => {
-            p.consume(&kind)?;
-            InfixOp::Sub
-        }
-        Some(kind @ Kind::Times) => {
-            p.consume(&kind)?;
-            InfixOp::Mul
-        }
-        Some(kind @ Kind::Slash) => {
-            p.consume(&kind)?;
-            InfixOp::Div
-        }
-        Some(kind @ Kind::And) => {
-            p.consume(&kind)?;
-            InfixOp::And
-        }
-        Some(kind @ Kind::Or) => {
-            p.consume(&kind)?;
-            InfixOp::Or
-        }
-        Some(kind @ Kind::Percent) => {
-            p.consume(&kind)?;
-            InfixOp::Mod
-        }
-        x => {
-            return Err(Error::new(
-                &format! {"Invalid infix operator: {:?}", x},
-                start..p.cursor,
-                p.input,
-            ));
+pub fn peek_operator<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Option<(Operator, Kind)> {
+    let kind = p.peek();
+    let op = match &kind {
+        Some(Kind::Eqq) => Operator::Eq,
+        Some(Kind::Neq) => Operator::NotEq,
+        Some(Kind::RAngle) => Operator::Gt,
+        Some(Kind::LAngle) => Operator::Lt,
+        Some(Kind::Gte) => Operator::Gte,
+        Some(Kind::Lte) => Operator::Lte,
+        Some(Kind::Plus) => Operator::Add,
+        Some(Kind::Minus) => Operator::Sub,
+        Some(Kind::Times) => Operator::Mul,
+        Some(Kind::Slash) => Operator::Div,
+        Some(Kind::And) => Operator::And,
+        Some(Kind::Or) => Operator::Or,
+        Some(Kind::Percent) => Operator::Mod,
+        Some(Kind::Bang) => Operator::Bang,
+        Some(Kind::Pow) => Operator::Pow,
+        _ => {
+            return None;
         }
     };
-    Ok(op)
+    Some((op, kind.unwrap()))
 }
 
 pub fn list_expressions<'input>(
@@ -431,7 +409,7 @@ mod tests {
         assert_matches!(
             result,
             Ast::Infix {
-                op: InfixOp::Add,
+                op: Operator::Add,
                 ..
             }
         );
@@ -441,7 +419,7 @@ mod tests {
         assert_matches!(
             result,
             Ast::Infix {
-                op: InfixOp::Add,
+                op: Operator::Add,
                 ..
             }
         );
