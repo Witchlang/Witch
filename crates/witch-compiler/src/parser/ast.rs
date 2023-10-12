@@ -1,10 +1,28 @@
 use std::{collections::HashMap, ops::Range, path::PathBuf};
 
-use witch_runtime::{value::Value, vm::InfixOp};
+use witch_runtime::value::Value;
 
 use crate::types::{Type, TypeDecl};
 
 use super::Spanned;
+
+#[repr(u8)]
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub enum InfixOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+    Eq,
+    NotEq,
+    Lt,
+    Lte,
+    Gt,
+    Gte,
+    And,
+    Or,
+}
 
 /// Ast describes the abstract syntax tree used for Witch.
 #[cfg_attr(debug_assertions, derive(Debug))]

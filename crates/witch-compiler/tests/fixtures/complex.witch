@@ -60,11 +60,11 @@ interface Iterator<T> {
     next: () -> Option<T>
 }
 
-function map<I, T, U>(it: I<T>, f: (T) -> U) where I: Iterator -> I<U> {
-    for e in it {
-        yield f(e)
-    }
-}
+#function map<I, T, U>(it: I<T>, f: (T) -> U) where I: Iterator -> I<U> {
+#    for e in it {
+#        yield f(e)
+#    }
+#}
 
 #let result = case foo.maybe_bar {
 #    Some(bar) -> bar.add(10),
@@ -78,16 +78,16 @@ let some_list = [some_number, (() -> 5)(), 15]
 
 # UFCS. map and filter are in the prelude and take I: Iterator
 let some_list2 = some_list
-    .map((i) -> i + 5)
-    .filter((i) -> i % 5)
+    .map((x) -> i + 5)
+    .filter((test) -> i - 5)
 
 let res = send(some_list2)
 
-for i in some_list2 {
-    print(i)
-}
+#for i in some_list2 {
+#    print(i)
+#}
 
-loop {
-    print("Hello from the loop")
-    break
-}
+#loop {
+#    print("Hello from the loop")
+#    break
+#}

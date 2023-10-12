@@ -1,13 +1,13 @@
 use crate::error::{Error, Result};
 use crate::types::Type;
 use std::collections::HashMap;
-use witch_runtime::{value::Value, vm::InfixOp};
+use witch_runtime::value::Value;
 
 use super::{
-    ast::Ast,
+    ast::{Ast, InfixOp},
     either,
     lexer::{Kind, Lexer},
-    maybe, maybe_type,
+    maybe,
     r#type::{properties, type_literal},
     statement::statement,
     Parser,
@@ -46,13 +46,7 @@ pub fn expression<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<Ast> 
                 }
             } else {
                 let var = Ast::Var(ident);
-
-                // Variables can be called as functions
-                if p.at(Kind::LParen) {
-                    function_call(p, Box::new(var))?
-                } else {
-                    var
-                }
+                var
             }
         }
         Some(Kind::LParen) => {
@@ -96,6 +90,18 @@ pub fn infix_operator<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<I
         Some(kind @ Kind::Eqq) => {
             p.consume(&kind)?;
             InfixOp::Eq
+        }
+        Some(kind @ Kind::Neq) => {
+            p.consume(&kind)?;
+            InfixOp::NotEq
+        }
+        Some(kind @ Kind::RAngle) => {
+            p.consume(&kind)?;
+            InfixOp::Gt
+        }
+        Some(kind @ Kind::LAngle) => {
+            p.consume(&kind)?;
+            InfixOp::Lt
         }
         Some(kind @ Kind::Gte) => {
             p.consume(&kind)?;
@@ -292,16 +298,17 @@ pub fn function_expression<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Res
 
     p.consume(&Kind::Arrow)?;
 
-    let mut returns = Type::Unknown;
-    let body = if let Ok(ty) = maybe_type(p, type_literal) {
-        returns = ty;
-        p.consume(&Kind::LBrace)?;
-
-        let stmt = statement(p).unwrap();
-        p.consume(&Kind::RBrace)?;
-        stmt
-    } else {
-        expression(p)?
+    let (returns, body) = {
+        let mut fork = p.fork();
+        if let (Ok(ty), true) = (type_literal(&mut fork), fork.at(Kind::LBrace)) {
+            *p = fork;
+            p.consume(&Kind::LBrace)?;
+            let body = statement(p)?;
+            p.consume(&Kind::RBrace)?;
+            (ty, body)
+        } else {
+            (Type::Unknown, expression(p)?)
+        }
     };
 
     Ok(Ast::Function {
@@ -353,6 +360,7 @@ fn list_args<'input>(
     Ok(args)
 }
 
+#[cfg(test)]
 mod tests {
 
     use super::*;
@@ -360,7 +368,15 @@ mod tests {
 
     #[test]
     fn it_parses_function_expressions() {
-        let mut p = Parser::new("() -> 1");
+        let mut p = Parser::new("(s) -> 1");
+        let result = expression(&mut p).unwrap();
+        assert_matches!(result, Ast::Function { .. });
+
+        let mut p = Parser::new("() -> \"hello\"");
+        let result = expression(&mut p).unwrap();
+        assert_matches!(result, Ast::Function { .. });
+
+        let mut p = Parser::new("() -> void {}");
         let result = expression(&mut p).unwrap();
         assert_matches!(result, Ast::Function { .. });
 
@@ -387,6 +403,10 @@ mod tests {
         let result = expression(&mut p).unwrap();
         assert_matches!(result, Ast::Value(Value::Usize(_)));
 
+        let mut p = Parser::new("1.0");
+        let result = expression(&mut p).unwrap();
+        assert_matches!(result, Ast::Value(Value::F32(_)));
+
         let mut p = Parser::new("\"a string literal\"");
         let result = expression(&mut p).unwrap();
         assert_matches!(result, Ast::Value(Value::String(_)));
@@ -394,6 +414,14 @@ mod tests {
         let mut p = Parser::new("[1, 2, 3]");
         let result = expression(&mut p).unwrap();
         assert_matches!(result, Ast::List { .. });
+
+        let mut p = Parser::new("()");
+        let result = expression(&mut p).unwrap();
+        assert_matches!(result, Ast::Nop);
+
+        let mut p = Parser::new("(((((((((1)))))))))");
+        let result = expression(&mut p).unwrap();
+        assert_matches!(result, Ast::Value(Value::Usize(1)));
     }
 
     #[test]

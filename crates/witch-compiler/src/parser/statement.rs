@@ -54,15 +54,17 @@ pub fn statement<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<Ast> {
             }
         }
         Some(Kind::KwLet) => {
-            p.consume(&Kind::KwLet);
+            p.consume(&Kind::KwLet)?;
             let (ident, expr) = assignment(p)?;
-            p.consume(&Kind::Semicolon);
             let end = p.cursor;
             let assignment = Ast::Let {
                 ident,
                 expr: Box::new(expr),
                 span: start..end,
             };
+            if p.at(Kind::Semicolon) {
+                p.consume(&Kind::Semicolon)?;
+            }
             Ast::Statement {
                 stmt: Box::new(assignment),
                 rest: Box::new(statement(p)?),
@@ -70,7 +72,7 @@ pub fn statement<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<Ast> {
             }
         }
         Some(Kind::KwReturn) => {
-            p.consume(&Kind::KwReturn);
+            p.consume(&Kind::KwReturn)?;
             let expr = Box::new(expression(p)?);
             Ast::Return {
                 expr,
@@ -94,6 +96,9 @@ pub fn statement<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<Ast> {
         Some(Kind::At) => annotation(p)?,
         Some(_) => {
             let expr = expression(p)?;
+            if p.at(Kind::Semicolon) {
+                p.consume(&Kind::Semicolon)?;
+            }
             let end = p.cursor;
             Ast::Statement {
                 stmt: Box::new(expr),
@@ -101,14 +106,8 @@ pub fn statement<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<Ast> {
                 span: start..end,
             }
         }
-        kind => {
-            let token = p.tokens.next().unwrap();
-            todo!(
-                "{:?} not yet implemented: {} at {}",
-                kind,
-                p.text(&token),
-                p.cursor
-            )
+        None => {
+            return Ok(Ast::Nop);
         }
     };
     if p.at(Kind::Semicolon) {
@@ -159,7 +158,7 @@ fn annotation<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<Ast> {
 pub fn function_declaration<'input>(
     p: &mut Parser<'input, Lexer<'input>>,
 ) -> Result<(String, Ast)> {
-    p.consume(&Kind::KwFn);
+    p.consume(&Kind::KwFn)?;
 
     let token = p.consume(&Kind::Ident)?;
     let name = p.text(&token).to_string();

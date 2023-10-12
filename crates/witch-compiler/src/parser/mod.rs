@@ -129,7 +129,7 @@ impl<'input> Parser<'input, Lexer<'input>> {
                 self.repeating(tokens, expected, separator)
             }
             (Some(kind), Some(sep)) if &kind == sep => {
-                self.consume(&kind);
+                self.consume(&kind)?;
                 self.repeating(tokens, expected, separator)
             }
             _ => Ok(tokens),
@@ -184,9 +184,9 @@ pub fn maybe<'input, T>(
 #[test]
 fn forked_parser() {
     let mut p = Parser::new("some input, () = <> *");
-    p.consume(&Kind::Ident);
-    p.consume(&Kind::Ident);
-    p.consume(&Kind::Comma);
+    let _ = p.consume(&Kind::Ident);
+    let _ = p.consume(&Kind::Ident);
+    let _ = p.consume(&Kind::Comma);
     let mut fork = p.fork();
 
     assert_eq!(p.peek(), fork.peek());

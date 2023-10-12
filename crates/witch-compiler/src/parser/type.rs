@@ -33,9 +33,9 @@ pub fn struct_declaration<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Resu
     // Possibly type variables
     // <T, U>
     let type_vars = if let Some(Kind::LAngle) = p.peek() {
-        p.consume(&Kind::LAngle);
+        p.consume(&Kind::LAngle)?;
         let vars = p.repeating(vec![], Kind::Ident, Some(Kind::Comma))?;
-        p.consume(&Kind::RAngle);
+        p.consume(&Kind::RAngle)?;
         vars.iter()
             .map(|t| p.text(t).to_string())
             .collect::<Vec<String>>()
@@ -189,9 +189,9 @@ pub fn enum_declaration<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result
     // Possibly type variables
     // <T, U>
     let type_vars = if let Some(Kind::LAngle) = p.peek() {
-        p.consume(&Kind::LAngle);
+        p.consume(&Kind::LAngle)?;
         let vars = p.repeating(vec![], Kind::Ident, Some(Kind::Comma))?;
-        p.consume(&Kind::RAngle);
+        p.consume(&Kind::RAngle)?;
         vars.iter()
             .map(|t| p.text(t).to_string())
             .collect::<Vec<String>>()
