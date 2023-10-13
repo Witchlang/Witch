@@ -1,4 +1,4 @@
-use crate::error::{Result};
+use crate::error::Result;
 use witch_runtime::value::Value;
 
 /// Serializes a Value into bytecode

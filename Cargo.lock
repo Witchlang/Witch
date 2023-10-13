@@ -587,5 +587,7 @@ dependencies = [
 name = "witch_runtime"
 version = "0.1.0"
 dependencies = [
+ "bincode",
+ "hashbrown",
  "serde",
 ]

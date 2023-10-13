@@ -30,9 +30,8 @@ pub fn compile(file_path: PathBuf, maybe_ctx: Option<Context>) -> Result<(Vec<u8
 
     let mut ctx = maybe_ctx.unwrap_or_default();
     let (bc, _) = compiler::compile(&mut ctx, &ast).unwrap();
-    // let prelude = ctx.flush();
-    // Ok(([prelude, bc].concat(), ctx))
-    Ok((bc, ctx))
+    let prelude = ctx.flush();
+    Ok(([prelude, bc].concat(), ctx))
 }
 
 /// Canonicalizes a file path from our `start_path`, returning the new path as well as the file contents.

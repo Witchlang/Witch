@@ -1,6 +1,7 @@
 use alloc::vec;
 use alloc::vec::Vec;
 
+use crate::heap::Handle;
 use crate::value::Value;
 
 /// Pointer is a usize referring to a Value or an Entry located somewhere else
@@ -10,7 +11,7 @@ pub enum Pointer {
     Stack(usize),
 
     /// Refers to a value handle within our GC'd heap
-    Heap(usize),
+    Heap(Handle),
 
     /// Refers to a stack entry within the value cache
     Cache(usize),

@@ -2,7 +2,8 @@ use alloc::vec;
 use alloc::vec::Vec;
 use serde::{Deserialize, Serialize};
 
-use crate::stack::{Entry, Stack};
+use crate::heap::Heap;
+use crate::stack::{Entry, Pointer, Stack};
 use crate::value::{Function, Value};
 
 #[repr(u8)]
@@ -74,9 +75,10 @@ pub struct CallFrame {
 
 pub struct Vm {
     stack: Stack,
+    heap: Heap,
     frames: Vec<CallFrame>,
     functions: Vec<Function>,
-    cache: Vec<Value>,
+    cache: Vec<Entry>,
 }
 
 impl Default for Vm {
@@ -89,6 +91,7 @@ impl Vm {
     pub fn new() -> Self {
         Self {
             stack: Stack::new(),
+            heap: Heap::default(),
             frames: vec![],
             functions: vec![],
             cache: vec![],
@@ -207,14 +210,41 @@ impl Vm {
             let opcode_timer_start = std::time::Instant::now();
 
             let op = Op::from(self.current_byte());
-            let offset = 0;
+            let mut offset = 0;
             let forward = true;
 
             #[cfg(feature = "profile")]
             let opcode_timer_start = std::time::Instant::now();
 
+            dbg!(&op);
+
             // An offset to the instruction pointer, for when ops consume more bytes than 1
             match op {
+                Op::SetupValueCache => {
+                    let num_items_bytes = self.next_eight_bytes();
+                    let num_items = usize::from_ne_bytes(num_items_bytes);
+                    for _ in 0..num_items {
+                        let v = self.stack.pop().unwrap();
+                        self.cache.push(v);
+                    }
+                    offset = 8;
+                }
+                Op::SetupFunctionCache => {
+                    let num_items_bytes = self.next_eight_bytes();
+                    let num_items = usize::from_ne_bytes(num_items_bytes);
+                    // for _ in 0..num_items {
+                    //     let v = self.stack.pop().unwrap();
+                    //     self.functions.push(v);
+                    // }
+                    offset = 8;
+                }
+
+                Op::GetValue => {
+                    let idx = self.next_byte();
+                    self.stack.push(self.cache[idx as usize]);
+                    offset = 1;
+                }
+
                 Op::Binary => {
                     let bin_op = InfixOp::from(self.next_byte());
                     let b = self.stack.pop().unwrap();
@@ -227,6 +257,57 @@ impl Vm {
                         }
                     };
                     self.stack.push(res);
+                    offset = 1;
+                }
+                Op::Push => {
+                    let value_length_bytes: [u8; 8] = self.next_eight_bytes();
+                    let value_length = usize::from_ne_bytes(value_length_bytes);
+                    let value_bytes = &self.functions[self.frame().function_ptr].bytecode
+                        [(&self.frame().ip + 9)..(&self.frame().ip + 9 + value_length)];
+
+                    let (mut value, _): (Value, usize) =
+                        bincode::serde::decode_from_slice(value_bytes, bincode::config::legacy())
+                            .unwrap();
+
+                    let stackentry = match value {
+                        Value::Usize(i) => Entry::Usize(i),
+                        Value::Bool(b) => Entry::Bool(b),
+                        // Todo all primitive types that get to be stack entries
+                        _ => {
+                            // if let Value::Function(mut f) = value {
+                            //     for (i, x) in f
+                            //         .upvalues_bytecode
+                            //         .as_slice()
+                            //         .to_owned()
+                            //         .chunks(2)
+                            //         .enumerate()
+                            //     {
+                            //         let is_local = x[0];
+                            //         let stack_idx = x[1];
+                            //         if is_local == 1 {
+                            //             f.upvalues.insert(
+                            //                 i,
+                            //                 self.capture_upvalue(
+                            //                     self.frame().stack_start + stack_idx as usize,
+                            //                 ),
+                            //             )
+                            //         } else {
+                            //             f.upvalues.insert(
+                            //                 i,
+                            //                 self.functions[self.frame().function].upvalues
+                            //                     [stack_idx as usize],
+                            //             )
+                            //         }
+                            //     }
+                            //     value = Value::Function(f);
+                            // }
+                            Entry::Pointer(Pointer::Heap(self.heap.insert(value)))
+                        }
+                    };
+
+                    self.stack.push(stackentry);
+
+                    offset = 8 + value_length;
                 }
                 x => {
                     return Err(Value::Error(crate::value::Error::InvalidOp(x)));

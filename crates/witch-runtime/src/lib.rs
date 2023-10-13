@@ -3,6 +3,7 @@
 #![cfg_attr(not(feature = "debug"), no_std)]
 extern crate alloc;
 
+mod heap;
 mod stack;
 pub mod value;
 pub mod vm;

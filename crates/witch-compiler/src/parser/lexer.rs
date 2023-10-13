@@ -89,7 +89,7 @@ pub enum Kind {
     // Keywords
     #[token("let")]
     KwLet,
-    #[regex(r#"import ((?&ident)|/)+\n"#)]
+    #[regex(r#"import ((?&ident)|/)+"#)]
     KwImport,
     #[token("if")]
     KwIf,

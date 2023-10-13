@@ -5,8 +5,8 @@
 */
 
 # Imports
-import witch/some_module
-import witch/list
+# import witch/some_module
+# import witch/list
 
 # Enums with generics
 enum Option<T> {
@@ -22,7 +22,7 @@ interface Calc {
 }
 
 # Structs
-@todo
+#@todo
 struct Bar {
 
     field: i32

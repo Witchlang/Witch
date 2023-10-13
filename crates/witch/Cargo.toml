@@ -6,6 +6,7 @@ edition = "2018"
 [lib]
 
 [features]
+default = ["compiler"]
 compiler = ["dep:witch_compiler"]
 
 [dependencies]
