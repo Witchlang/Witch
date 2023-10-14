@@ -5,9 +5,11 @@ use crate::parser::lexer::{Kind, Lexer};
 
 use crate::parser::ast::Ast;
 use crate::parser::r#type::{enum_declaration, interface_declaration, struct_declaration};
+use crate::types::Type;
 
 use super::expression::{expression, function_expression};
 use super::Parser;
+use super::r#type::type_literal;
 
 pub fn statement<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<Ast> {
     let start = p.cursor;
@@ -55,10 +57,11 @@ pub fn statement<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<Ast> {
         }
         Some(Kind::KwLet) => {
             p.consume(&Kind::KwLet)?;
-            let (ident, expr) = assignment(p)?;
+            let (ident, annotated_type, expr) = assignment(p)?;
             let end = p.cursor;
             let assignment = Ast::Let {
                 ident,
+                annotated_type,
                 expr: Box::new(expr),
                 span: start..end,
             };
@@ -84,6 +87,7 @@ pub fn statement<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<Ast> {
             let end = p.cursor;
             let assignment = Ast::Let {
                 ident,
+                annotated_type: None,
                 expr: Box::new(expr),
                 span: start..end,
             };
@@ -116,10 +120,17 @@ pub fn statement<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<Ast> {
     Ok(stmt)
 }
 
-fn assignment<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<(String, Ast)> {
+fn assignment<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<(String, Option<Type>, Ast)> {
     let start = p.cursor;
     let token = p.consume(&Kind::Ident)?;
     let ident = p.text(&token).to_string();
+
+    let annotated_type = if p.at(Kind::Colon) {
+        p.consume(&Kind::Colon);
+        Some(type_literal(p)?)
+    } else {
+        None
+    };
 
     p.consume(&Kind::Eq)?;
 
@@ -127,6 +138,7 @@ fn assignment<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<(String, 
 
     Ok((
         ident.clone(),
+        annotated_type,
         Ast::Assignment {
             ident,
             expr,

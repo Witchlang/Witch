@@ -18,4 +18,12 @@ impl Error {
             source: source[span.start..span.end].to_string(),
         }
     }
+
+    pub fn fatal() -> Self {
+        Self {
+            msg: "Something terrible happened. Code: 4545345".to_string(),
+            span: 0..0,
+            source: "".to_string(),
+        }
+    }
 }

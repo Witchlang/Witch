@@ -18,7 +18,7 @@ impl Heap {
     }
 }
 
-#[cfg_attr(feature = "parser", derive(Debug))]
+#[derive(Debug)]
 pub struct Handle {
     ptr: *mut Value,
 }

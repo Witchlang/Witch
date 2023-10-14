@@ -7,7 +7,7 @@ fn it_runs() {
     use witch_compiler::compile;
     use witch_runtime::value::Value;
 
-    let expected = Value::Usize(2);
+    let expected = Value::Usize(7);
     let (bytecode, _) = compile(PathBuf::from("tests/fixtures/basic.witch"), None).unwrap();
     let mut vm = Vm::new();
     let result = vm.run(bytecode).unwrap();

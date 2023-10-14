@@ -5,7 +5,7 @@ use crate::heap::Handle;
 use crate::value::Value;
 
 /// Pointer is a usize referring to a Value or an Entry located somewhere else
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub enum Pointer {
     /// Refers to an entry within the stack
     Stack(usize),
@@ -20,7 +20,7 @@ pub enum Pointer {
     Function(usize),
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub enum Entry {
     Void,
     Isize(isize),
@@ -43,6 +43,7 @@ impl From<Entry> for Value {
 /// The stack is your normal stack-based abstraction, which of course cheats
 /// where applicable - elements may be modified in place or accessed at their indices
 /// rather than necessarily requiring pushing or poping.
+#[derive(Debug)]
 pub struct Stack {
     data: Vec<Entry>,
 }
@@ -57,5 +58,17 @@ impl Stack {
 
     pub fn pop(&mut self) -> Option<Entry> {
         self.data.pop()
+    }
+
+    pub fn get(&mut self, idx: usize) -> Entry {
+        self.data[idx]
+    }
+
+    pub fn set(&mut self, idx: usize, entry: Entry) {
+        self.data[idx] = entry;
+    }
+
+    pub fn len(&self) -> usize {
+        self.data.len()
     }
 }

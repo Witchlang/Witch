@@ -29,6 +29,8 @@ impl core::convert::From<u8> for InfixOp {
     fn from(byte: u8) -> Self {
         match byte {
             0 => InfixOp::Add,
+            1 => InfixOp::Sub,
+            2 => InfixOp::Mul,
             _ => todo!(),
         }
     }
@@ -44,6 +46,8 @@ pub enum Op {
     GetFunction,
 
     Push,
+    Get,
+    Set,
 
     Binary,
 
@@ -59,8 +63,10 @@ impl core::convert::From<u8> for Op {
             3 => Op::GetFunction,
 
             4 => Op::Push,
+            5 => Op::Get,
+            6 => Op::Set,
 
-            5 => Op::Binary,
+            7 => Op::Binary,
             _ => Op::Crash,
         }
     }
@@ -210,23 +216,27 @@ impl Vm {
             let opcode_timer_start = std::time::Instant::now();
 
             let op = Op::from(self.current_byte());
-            let mut offset = 0;
+            let offset;
             let forward = true;
+
+            dbg!(&op);
 
             #[cfg(feature = "profile")]
             let opcode_timer_start = std::time::Instant::now();
-
-            dbg!(&op);
 
             // An offset to the instruction pointer, for when ops consume more bytes than 1
             match op {
                 Op::SetupValueCache => {
                     let num_items_bytes = self.next_eight_bytes();
                     let num_items = usize::from_ne_bytes(num_items_bytes);
+                    let mut items = vec![];
                     for _ in 0..num_items {
-                        let v = self.stack.pop().unwrap();
-                        self.cache.push(v);
+                        items.push(self.stack.pop().unwrap());
                     }
+                    for e in items.iter().rev() {
+                        self.cache.push(*e);
+                    }
+                    
                     offset = 8;
                 }
                 Op::SetupFunctionCache => {
@@ -241,7 +251,34 @@ impl Vm {
 
                 Op::GetValue => {
                     let idx = self.next_byte();
-                    self.stack.push(self.cache[idx as usize]);
+                    dbg!(&idx, &self.cache);
+                    let val = self.cache[idx as usize];
+                    dbg!(val);
+                    self.stack.push(val);
+                    offset = 1;
+                }
+
+                Op::Set => {
+                    let idx = self.next_byte();
+                    let stackentry = self.stack.pop().unwrap();
+
+                    let stack_idx = self.frame().stack_start + idx as usize;
+                    if stack_idx == self.stack.len() {
+                        self.stack.push(stackentry);
+                    } else {
+                        // // Edge case: Dylibs need runtime type tracking, and will assume the type
+                        // // which is declared in the uninitialized value already on the stack.
+                        // if let (Value::Uninitialized(ty), Value::Dylib(dy)) =
+                        //     (self.stack[stack_idx].into(), stackentry.into())
+                        // {
+                        //     dbg!(&ty);
+                        //     let mut new_dy = dy.clone();
+                        //     new_dy.r#type = ty.clone();
+                        //     stackentry =
+                        //         StackEntry::Pointer(self.heap.insert(Value::Dylib(new_dy)));
+                        // }
+                        self.stack.set(stack_idx, stackentry);
+                    }
                     offset = 1;
                 }
 
@@ -249,8 +286,11 @@ impl Vm {
                     let bin_op = InfixOp::from(self.next_byte());
                     let b = self.stack.pop().unwrap();
                     let a = self.stack.pop().unwrap();
+                    dbg!(a, b);
                     let res = match (a, bin_op, b) {
                         (Entry::Usize(a), InfixOp::Add, Entry::Usize(b)) => Entry::Usize(a + b),
+                        (Entry::Usize(a), InfixOp::Sub, Entry::Usize(b)) => Entry::Usize(a - b),
+                        (Entry::Usize(a), InfixOp::Mul, Entry::Usize(b)) => Entry::Usize(a * b),
 
                         (_x, _op, _y) => {
                             todo!()
@@ -309,6 +349,15 @@ impl Vm {
 
                     offset = 8 + value_length;
                 }
+                Op::Get => {
+                    let b = self.next_byte();
+                    let entry = self.stack.get(self.frame().stack_start + b as usize);
+                    dbg!(entry);
+                    self.stack
+                        .push(entry);
+
+                    offset = 1;
+                }
                 x => {
                     return Err(Value::Error(crate::value::Error::InvalidOp(x)));
                 }
@@ -329,6 +378,8 @@ impl Vm {
                 })
                 .or_insert((opcode_timer_start.elapsed().as_nanos(), 1));
         }
+
+            dbg!(&self.stack);
 
         // When the script exits, return whatever is on the top of the stack
         if let Some(entry) = self.stack.pop() {

@@ -100,6 +100,7 @@ pub enum Ast {
     // an Assignment expression.
     Let {
         ident: String,
+        annotated_type: Option<Type>,
         expr: Box<Self>,
         span: Range<usize>,
     },
