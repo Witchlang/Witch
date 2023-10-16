@@ -1,20 +1,19 @@
-use crate::value::Value;
-use alloc::boxed::Box;
+use slab::Slab;
+
+use crate::{value::Value, stack::Pointer};
 
 #[derive(Default)]
 pub struct Heap {
-    objects: Vec<Box<Value>>,
+    mem: Slab<Value>,
 }
 
 impl Heap {
-    pub fn push(&mut self, value: Value) -> usize {
-        let ptr = Box::new(value);
-        self.objects.push(ptr);
-        self.objects.len() - 1
+    pub fn insert(&mut self, value: Value) -> Pointer {
+        Pointer::Heap(self.mem.insert(value))
     }
 
-    pub fn get(&mut self, idx: usize) -> Value {
-        *core::mem::replace(&mut self.objects[idx], Box::new(Value::Void))
+    pub fn get(&mut self, key: usize) -> &mut Value {
+        self.mem.get_mut(key).unwrap()
     }
 }
 

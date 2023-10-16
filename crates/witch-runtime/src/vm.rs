@@ -137,7 +137,7 @@ impl Vm {
             .unwrap()
     }
 
-    fn deref(&mut self, ptr: Pointer) -> Value {
+    fn deref(&mut self, ptr: Pointer) -> &mut Value {
         match ptr {
             Pointer::Heap(idx) => self.heap.get(idx),
             _ => todo!()
@@ -348,7 +348,7 @@ impl Vm {
                             //     }
                             //     value = Value::Function(f);
                             // }
-                            Entry::Pointer(Pointer::Heap(self.heap.push(value)))
+                            Entry::Pointer(self.heap.insert(value))
                         }
                     };
 
@@ -388,7 +388,7 @@ impl Vm {
         // When the script exits, return whatever is on the top of the stack
         if let Some(entry) = self.stack.pop() {
             let value = match entry.into() {
-                Value::Pointer(p) => self.deref(p),
+                Value::Pointer(p) => self.deref(p).to_owned(),
                 v => v
             };
             Ok(value)
