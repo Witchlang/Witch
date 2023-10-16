@@ -4,7 +4,7 @@ mod util;
 use std::collections::HashMap;
 use std::ops::Range;
 
-use crate::error::{Result, Error};
+use crate::error::{Error, Result};
 use crate::parser::ast::{Ast, Operator};
 use crate::types::{Type, TypeDecl};
 use witch_runtime::{value::Value, vm::Op};
@@ -136,10 +136,16 @@ pub fn compile<'a>(ctx: &mut Context, ast: &Ast) -> Result<(Vec<u8>, Type)> {
     ctx.lineage.push(ast.clone());
 
     let (bytecode, return_type) = match &ast {
-        Ast::Assignment { ident, expr , span} => assignment(ctx, ident, expr, span)?,
-        Ast::Infix { lhs, op, rhs, .. } => binary_operation(ctx, lhs, op, rhs)?,
+        Ast::Assignment { ident, expr, span } => assignment(ctx, ident, expr, span)?,
+        //Ast::Function { is_variadic, args, returns, body, generics } => function(is_variadic, args, returns, body, generics)?,
+        Ast::Infix { lhs, op, rhs, .. } => infix(ctx, lhs, op, rhs)?,
         //  Ast::Member { container, key } => member(ctx, container, key)?,
-        Ast::Let { ident, annotated_type, expr, span } => let_(ctx, ident, annotated_type, expr, span)?,
+        Ast::Let {
+            ident,
+            annotated_type,
+            expr,
+            span,
+        } => let_(ctx, ident, annotated_type, expr, span)?,
         Ast::Statement { stmt, rest, span } => statement(ctx, stmt.clone(), rest.clone(), span)?,
         Ast::Type { name, decl, span } => decl_type(ctx, name, decl, span)?,
         Ast::Value(v) => value(ctx, v)?,
@@ -152,8 +158,12 @@ pub fn compile<'a>(ctx: &mut Context, ast: &Ast) -> Result<(Vec<u8>, Type)> {
 
 /// Assigns a local variable by setting its new value without initializing it.
 /// It needs to either be mutable or the parent expr needs to be `Ast::Let`.
-fn assignment(ctx: &mut Context, ident: &str, expr: &Box<Ast>, span: &Range<usize>) -> Result<(Vec<u8>, Type)> {
-
+fn assignment(
+    ctx: &mut Context,
+    ident: &str,
+    expr: &Box<Ast>,
+    span: &Range<usize>,
+) -> Result<(Vec<u8>, Type)> {
     let (mut expr_bytes, expr_type) = compile(ctx, expr)?;
 
     // Find a local var with the right name, get its index
@@ -166,67 +176,62 @@ fn assignment(ctx: &mut Context, ident: &str, expr: &Box<Ast>, span: &Range<usiz
     }
 
     if let Some((local_variable, local)) = local_variable {
-                if let Ok(local_variable) = u8::try_from(local_variable) {
-                    let var_type = local.r#type.clone();
-                    if var_type != Type::Unknown && var_type != expr_type {
-                        panic!(
-                            "cant coerce between types!!! var ({:?}): {:?}, expr: {:?}",
-                            local.name, local.r#type, &expr_type
-                        );
-                    }
-                    expr_bytes.push(Op::Set as u8);
-                    expr_bytes.push(local_variable);
-                    return Ok((expr_bytes, expr_type));
-                }
-                unreachable!()
-            } else if false //let Some((upvalue, ty)) = resolve_upvalue(&mut program.compiler_stack, compiler, ident)
-            {
-                todo!("upvalue");
-                // if ty != Type::Unknown && !ty.equals(&expr_type) {
-                //     panic!(
-                //         "cant coerce between types!!! upvalue type: {:?}, expr: {:?}",
-                //         &ty, &expr_type
-                //     );
-                // }
-                // bytecode.append(&mut expr_bytes);
-                // bytecode.push(OpCode::SetUpvalue as u8);
-                // bytecode.push(upvalue);
-                // return_type = expr_type;
-            } else {
-                panic!("Attempted to reassign unknown variable {:?}", ident)
+        if let Ok(local_variable) = u8::try_from(local_variable) {
+            let var_type = local.r#type.clone();
+            if var_type != Type::Unknown && var_type != expr_type {
+                panic!(
+                    "cant coerce between types!!! var ({:?}): {:?}, expr: {:?}",
+                    local.name, local.r#type, &expr_type
+                );
             }
-
-    
+            expr_bytes.push(Op::Set as u8);
+            expr_bytes.push(local_variable);
+            return Ok((expr_bytes, expr_type));
+        }
+        unreachable!()
+    } else if false
+    //let Some((upvalue, ty)) = resolve_upvalue(&mut program.compiler_stack, compiler, ident)
+    {
+        todo!("upvalue");
+        // if ty != Type::Unknown && !ty.equals(&expr_type) {
+        //     panic!(
+        //         "cant coerce between types!!! upvalue type: {:?}, expr: {:?}",
+        //         &ty, &expr_type
+        //     );
+        // }
+        // bytecode.append(&mut expr_bytes);
+        // bytecode.push(OpCode::SetUpvalue as u8);
+        // bytecode.push(upvalue);
+        // return_type = expr_type;
+    } else {
+        panic!("Attempted to reassign unknown variable {:?}", ident)
+    }
 }
 
 /// Expresses a binary operation such as 1 + 1, a == b, 9 > 8, etc.
 /// Requres the two expressions to be of the same type.
-fn binary_operation(
-    ctx: &mut Context,
-    a: &Box<Ast>,
-    op: &Operator,
-    b: &Box<Ast>,
-) -> Result<(Vec<u8>, Type)> {
+fn infix(ctx: &mut Context, a: &Box<Ast>, op: &Operator, b: &Box<Ast>) -> Result<(Vec<u8>, Type)> {
     let (mut bytecode, a_type) = compile(ctx, a)?;
     let (mut bytecode_b, b_type) = compile(ctx, b)?;
 
-    // Type check and set our return type for this expression.
-    // If either branch is of Unknown type, we will infer them to be the same.
-    let return_type = match (&a_type, &b_type) {
-        (x, y) if x != y => {
-            panic!(
-                "cant perform binary op or comparison on different types: {:?} != {:?}, expr: {:?}, {:?}",
-                &a_type, &b_type, &a, &b
-            );
-        }
-        (x, _) => x.to_owned(),
-    };
+    if !a_type.allowed_infix_operators(&b_type).contains(op) {
+        panic!(
+            "infix op {:?} not allowed between {:?} and {:?}",
+            op, a_type, b_type
+        );
+    }
+
+    if !a_type.is_numeric() || !b_type.is_numeric() {
+        // Handle string concat or mul,
+        // list concats etc by mapping against builtin functions for dealing with that stuff
+        todo!();
+    }
 
     bytecode.append(&mut bytecode_b);
     bytecode.push(Op::Binary as u8);
     bytecode.push(op.to_owned() as u8);
 
-    Ok((bytecode, return_type))
+    Ok((bytecode, a_type))
 }
 
 /// Accesses a member within an Object or Vector, by first putting the backing Object
@@ -387,41 +392,43 @@ fn decl_type(
 
 /// Assigns a local variable by setting its new value without initializing it.
 /// It needs to either be mutable or the parent expr needs to be `Ast::Let`.
-fn let_(ctx: &mut Context, ident: &str, annotated_type: &Option<Type>, expr: &Box<Ast>, span: &Range<usize>) -> Result<(Vec<u8>, Type)> {
-     
+fn let_(
+    ctx: &mut Context,
+    ident: &str,
+    annotated_type: &Option<Type>,
+    expr: &Box<Ast>,
+    span: &Range<usize>,
+) -> Result<(Vec<u8>, Type)> {
+    // Create a new local var of type `ty`
+    let ty = annotated_type.clone().unwrap_or(Type::Unknown);
+    let local_variable = LocalVariable {
+        name: ident.to_string(),
+        scope_depth: ctx.scopes.len(),
+        is_mutable: false,
+        is_captured: false,
+        r#type: ty.clone(),
+    };
+    ctx.scope()?.locals.push(local_variable);
 
-     
-     // Create a new local var of type `ty`
-     let ty = annotated_type.clone().unwrap_or(Type::Unknown);
-     let local_variable = LocalVariable {
-         name: ident.to_string(),
-         scope_depth: ctx.scopes.len(),
-         is_mutable: false,
-         is_captured: false,
-         r#type: ty.clone(),
-     };
-     ctx.scope()?.locals.push(local_variable);
+    let (mut assignment_bytes, mut assignment_type) = compile(ctx, expr)?;
 
-
-     let (mut assignment_bytes, mut assignment_type) = compile(ctx, expr)?;
-
-     // If the original type is Unknown, update the local var with the assignment type
-     // If it isn't, conduct a type check.
-     match ty {
-         Type::Unknown => {
+    // If the original type is Unknown, update the local var with the assignment type
+    // If it isn't, conduct a type check.
+    match ty {
+        Type::Unknown => {
             let locals = &mut ctx.scope()?.locals;
             locals.last_mut().unwrap().r#type = assignment_type.clone();
-         }
-         _ if ty != assignment_type => {
-             panic!(
-                 "attempted to assign value of type {:?} to a variable of type {:?}",
-                 assignment_type, ty
-             );
-         }
-         _ => {
-             assignment_type = ty;
-         }
-     }
+        }
+        _ if ty != assignment_type => {
+            panic!(
+                "attempted to assign value of type {:?} to a variable of type {:?}",
+                assignment_type, ty
+            );
+        }
+        _ => {
+            assignment_type = ty;
+        }
+    }
 
     Ok((assignment_bytes, assignment_type))
 }
@@ -447,7 +454,6 @@ fn value(ctx: &mut Context, value: &Value) -> Result<(Vec<u8>, Type)> {
         ]
         .concat()
     } else {
-        dbg!(&value);
         let idx = ctx.cache_value(value_bytecode);
         [vec![Op::GetValue as u8], (idx as u8).to_ne_bytes().to_vec()].concat()
     };
@@ -458,7 +464,6 @@ fn value(ctx: &mut Context, value: &Value) -> Result<(Vec<u8>, Type)> {
 /// Resolves a local variable. Since scope.locals will match the runtime stack,
 /// we grab the index by the provided name and emit <Get><stack-index>.
 fn var(ctx: &mut Context, ident: &String) -> Result<(Vec<u8>, Type)> {
-    
     // Find a local var with the right name, get its index
     let mut local_variable = None;
     let mut is_actually_builtin = false;
@@ -477,13 +482,15 @@ fn var(ctx: &mut Context, ident: &String) -> Result<(Vec<u8>, Type)> {
             return Ok((vec![Op::Get as u8, idx], return_type));
         }
         unreachable!()
-    } else /* if let Some((upvalue, ty)) =
+    } else
+    /* if let Some((upvalue, ty)) =
         resolve_upvalue(&mut program.compiler_stack, compiler, ident)
     {
         return_type = ty;
         bytecode.push(OpCode::GetUpvalue as u8);
         bytecode.push(upvalue)
-    } else */ {
+    } else */
+    {
         todo!();
         // If we dont find a variable with this name, it may be an Enum type
         // used in an Entry/Call expression.

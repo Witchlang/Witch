@@ -1,17 +1,16 @@
 use alloc::vec;
 use alloc::vec::Vec;
 
-use crate::heap::Handle;
 use crate::value::Value;
 
 /// Pointer is a usize referring to a Value or an Entry located somewhere else
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub enum Pointer {
     /// Refers to an entry within the stack
     Stack(usize),
 
     /// Refers to a value handle within our GC'd heap
-    Heap(Handle),
+    Heap(usize),
 
     /// Refers to a stack entry within the value cache
     Cache(usize),
@@ -35,7 +34,8 @@ impl From<Entry> for Value {
             Entry::Bool(b) => Value::Bool(b),
             Entry::Usize(i) => Value::Usize(i),
             Entry::Void => Value::Void,
-            _x => todo!(),
+            Entry::Pointer(p) => Value::Pointer(p),
+            x => todo!("{:?}", x),
         }
     }
 }
@@ -58,6 +58,10 @@ impl Stack {
 
     pub fn pop(&mut self) -> Option<Entry> {
         self.data.pop()
+    }
+
+    pub fn last_mut(&mut self) -> Option<&mut Entry> {
+        self.data.last_mut()
     }
 
     pub fn get(&mut self, idx: usize) -> Entry {

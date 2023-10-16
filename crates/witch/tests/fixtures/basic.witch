@@ -1,2 +1,10 @@
 let x = 1 + 2 * 5 - 5
-x + 1
+let y = x + 1;
+
+let ho = "string"
+
+#function id<T>(self: T) -> T {
+#   return self
+#}
+
+#id(y)

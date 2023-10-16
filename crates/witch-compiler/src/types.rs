@@ -3,7 +3,7 @@ use core::mem::discriminant;
 use std::collections::HashMap;
 use witch_runtime::value::Value;
 
-use crate::parser::ast::Ast;
+use crate::parser::ast::{Ast, Operator};
 
 #[derive(PartialEq, Clone, Debug)]
 pub enum TypeDecl {
@@ -288,6 +288,8 @@ impl Hash for Type {
 impl From<&Value> for Type {
     fn from(value: &Value) -> Type {
         match value {
+            Value::Usize(_) => Type::Usize,
+            Value::Isize(_) => Type::Isize,
             Value::List(vec) => {
                 if !vec.is_empty() {
                     Type::List(Box::new((&vec[0]).into()))
@@ -296,12 +298,34 @@ impl From<&Value> for Type {
                 }
             }
             Value::String(_) => Type::String,
-            _ => Type::Any,
+            _ => todo!(),
         }
     }
 }
 
 impl Type {
+    pub fn allowed_infix_operators(&self, rhs: &Type) -> Vec<Operator> {
+        match (self, rhs) {
+            (Type::Usize, Type::Usize) => vec![
+                Operator::Add,
+                Operator::Sub,
+                Operator::Div,
+                Operator::Mul,
+                Operator::Mod,
+            ],
+            (Type::String, Type::Usize) => vec![Operator::Mul],
+            _ => vec![],
+        }
+    }
+
+    pub fn is_numeric(&self) -> bool {
+        use Type::*;
+        matches!(
+            self,
+            Usize | Isize | U8 | I8 | U16 | I16 | U32 | I32 | U64 | I64 | U128 | I128 | F32 | F64
+        )
+    }
+
     pub fn from_str(str: &str, inner: Vec<Type>) -> Type {
         match &*str.to_lowercase() {
             "void" => Type::Void,

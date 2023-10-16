@@ -137,6 +137,13 @@ impl Vm {
             .unwrap()
     }
 
+    fn deref(&mut self, ptr: Pointer) -> Value {
+        match ptr {
+            Pointer::Heap(idx) => self.heap.get(idx),
+            _ => todo!()
+        }
+    }
+
     pub fn run(&mut self, bytecode: Vec<u8>) -> Result<Value, Value> {
         // Set up some profiling data
         #[cfg(feature = "profile")]
@@ -251,9 +258,7 @@ impl Vm {
 
                 Op::GetValue => {
                     let idx = self.next_byte();
-                    dbg!(&idx, &self.cache);
                     let val = self.cache[idx as usize];
-                    dbg!(val);
                     self.stack.push(val);
                     offset = 1;
                 }
@@ -282,21 +287,23 @@ impl Vm {
                     offset = 1;
                 }
 
+                // Conducts a binary operation between the two top entries on the stack. 
+                // The right-hand side is popped off the stack, while the left-hand side is edited
+                // in place with the result.
                 Op::Binary => {
                     let bin_op = InfixOp::from(self.next_byte());
                     let b = self.stack.pop().unwrap();
-                    let a = self.stack.pop().unwrap();
-                    dbg!(a, b);
-                    let res = match (a, bin_op, b) {
+                    let a = self.stack.last_mut().unwrap();
+                    *a = match (*a, bin_op, b) {
                         (Entry::Usize(a), InfixOp::Add, Entry::Usize(b)) => Entry::Usize(a + b),
                         (Entry::Usize(a), InfixOp::Sub, Entry::Usize(b)) => Entry::Usize(a - b),
                         (Entry::Usize(a), InfixOp::Mul, Entry::Usize(b)) => Entry::Usize(a * b),
+                        (Entry::Usize(a), InfixOp::Div, Entry::Usize(b)) => Entry::Usize(a / b),
 
-                        (_x, _op, _y) => {
-                            todo!()
+                        (x, op, y) => {
+                            todo!("binary op {:?} {:?} {:?}", x, op, y)
                         }
                     };
-                    self.stack.push(res);
                     offset = 1;
                 }
                 Op::Push => {
@@ -341,7 +348,7 @@ impl Vm {
                             //     }
                             //     value = Value::Function(f);
                             // }
-                            Entry::Pointer(Pointer::Heap(self.heap.insert(value)))
+                            Entry::Pointer(Pointer::Heap(self.heap.push(value)))
                         }
                     };
 
@@ -352,7 +359,6 @@ impl Vm {
                 Op::Get => {
                     let b = self.next_byte();
                     let entry = self.stack.get(self.frame().stack_start + b as usize);
-                    dbg!(entry);
                     self.stack
                         .push(entry);
 
@@ -379,11 +385,13 @@ impl Vm {
                 .or_insert((opcode_timer_start.elapsed().as_nanos(), 1));
         }
 
-            dbg!(&self.stack);
-
         // When the script exits, return whatever is on the top of the stack
         if let Some(entry) = self.stack.pop() {
-            Ok(entry.into())
+            let value = match entry.into() {
+                Value::Pointer(p) => self.deref(p),
+                v => v
+            };
+            Ok(value)
         } else {
             Ok(Value::Void)
         }

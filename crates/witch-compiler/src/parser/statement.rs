@@ -8,8 +8,8 @@ use crate::parser::r#type::{enum_declaration, interface_declaration, struct_decl
 use crate::types::Type;
 
 use super::expression::{expression, function_expression};
-use super::Parser;
 use super::r#type::type_literal;
+use super::Parser;
 
 pub fn statement<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<Ast> {
     let start = p.cursor;
@@ -120,7 +120,9 @@ pub fn statement<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<Ast> {
     Ok(stmt)
 }
 
-fn assignment<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<(String, Option<Type>, Ast)> {
+fn assignment<'input>(
+    p: &mut Parser<'input, Lexer<'input>>,
+) -> Result<(String, Option<Type>, Ast)> {
     let start = p.cursor;
     let token = p.consume(&Kind::Ident)?;
     let ident = p.text(&token).to_string();

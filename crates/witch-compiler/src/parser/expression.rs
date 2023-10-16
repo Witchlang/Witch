@@ -28,7 +28,13 @@ pub fn expression_inner<'input>(
             match lit {
                 Kind::Int => Ast::Value(Value::Usize(txt.parse().expect("invalid integer"))),
                 Kind::Float => Ast::Value(Value::F32(txt.parse().expect("invalid 32bit float"))),
-                Kind::String => Ast::Value(Value::String(txt.to_string())),
+                Kind::String => Ast::Value(Value::String(
+                    txt.strip_suffix("\"")
+                        .unwrap()
+                        .strip_prefix("\"")
+                        .unwrap()
+                        .to_string(),
+                )),
                 _ => unreachable!(),
             }
         }
