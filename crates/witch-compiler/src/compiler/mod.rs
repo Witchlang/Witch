@@ -7,6 +7,7 @@ use std::ops::Range;
 use crate::error::{Error, Result};
 use crate::parser::ast::{Ast, Operator};
 use crate::types::{Type, TypeDecl};
+use witch_runtime::value::Function;
 use witch_runtime::{value::Value, vm::Op};
 
 /// Contains all compile-time information about a locally scoped
@@ -40,6 +41,12 @@ pub struct Context {
     /// `compile` iteration up the the root node.
     pub lineage: Vec<Ast>,
 
+    /// If we are currently within a function declaration, this is it's type.
+    pub current_function_type: Option<Type>,
+
+    /// If we're currently in an assignment, keep track of Ident and the assigned Type (may be Unknown)
+    pub assignment_ctx: Option<(String, Type)>,
+
     /// Values get cached in order keep the subsequent programs smaller
     pub functions_cache: Vec<Cached>,
     pub value_cache: Vec<Cached>,
@@ -50,6 +57,8 @@ impl Default for Context {
         Self {
             scopes: vec![Scope::default()],
             lineage: Default::default(),
+            current_function_type: None,
+            assignment_ctx: None,
             functions_cache: Default::default(),
             value_cache: Default::default(),
         }
@@ -137,7 +146,14 @@ pub fn compile<'a>(ctx: &mut Context, ast: &Ast) -> Result<(Vec<u8>, Type)> {
 
     let (bytecode, return_type) = match &ast {
         Ast::Assignment { ident, expr, span } => assignment(ctx, ident, expr, span)?,
-        //Ast::Function { is_variadic, args, returns, body, generics } => function(is_variadic, args, returns, body, generics)?,
+        Ast::Call { expr, args, span: _ } => call(ctx, expr, args)?,
+        Ast::Function {
+            is_variadic,
+            args,
+            returns,
+            body,
+            generics,
+        } => function(ctx, is_variadic, args, returns, body, generics.clone())?,
         Ast::Infix { lhs, op, rhs, .. } => infix(ctx, lhs, op, rhs)?,
         //  Ast::Member { container, key } => member(ctx, container, key)?,
         Ast::Let {
@@ -146,6 +162,7 @@ pub fn compile<'a>(ctx: &mut Context, ast: &Ast) -> Result<(Vec<u8>, Type)> {
             expr,
             span,
         } => let_(ctx, ident, annotated_type, expr, span)?,
+        Ast::Return { expr, span: _ } => return_(ctx, expr)?,
         Ast::Statement { stmt, rest, span } => statement(ctx, stmt.clone(), rest.clone(), span)?,
         Ast::Type { name, decl, span } => decl_type(ctx, name, decl, span)?,
         Ast::Value(v) => value(ctx, v)?,
@@ -162,7 +179,7 @@ fn assignment(
     ctx: &mut Context,
     ident: &str,
     expr: &Box<Ast>,
-    span: &Range<usize>,
+    _span: &Range<usize>,
 ) -> Result<(Vec<u8>, Type)> {
     let (mut expr_bytes, expr_type) = compile(ctx, expr)?;
 
@@ -208,24 +225,257 @@ fn assignment(
     }
 }
 
+/// Functions are first-class, meaning that essentially anything can be called as
+/// a function and hopefully it'll evaluate to something callable.
+/// While the emitted bytecode is simple, some (a lot) more effort is required for the type checking
+/// during compilation.
+fn call(ctx: &mut Context, expr: &Box<Ast>, args: &Vec<Ast>) -> Result<(Vec<u8>, Type)> {
+    let mut bytecode = vec![];
+    // If this is being called on an Entry expression, that means a method call.
+    // Method call means we have an implicit `self` variable as a first argument.
+    // Let's stick the Entry object on the stack before the arguments then.
+    if let Ast::Member { container, .. } = *expr.clone() {
+        let (mut bc, _) = compile(ctx, &container)?;
+        bytecode.append(&mut bc);
+    }
+
+    let mut args_with_types = vec![];
+    for arg in args.iter() {
+        let (mut bc, arg_type) = compile(ctx, arg)?;
+        bytecode.append(&mut bc);
+        args_with_types.push((arg.clone(), arg_type));
+    }
+
+    let (mut bc, mut called_type) = compile(ctx, expr)?;
+
+    // This handles the recursion edge case. When we're calling a function recursively, it's not actually bound to the
+    // variable name at the time of compiling the function body, so the variable we're calling is undefined at this point.
+    // That makes it very hard to type check and infer the return type!
+    // Hopefully, EITHER the LET expression OR the FUNCTION expressions are annotated.
+    // If the LET expression is annotated, the Expr::Var evaluation will return the correct type as that information
+    // is tracked during initialization. If not, the type information for our current function declaration is tracked
+    // within the current context object.
+    if let (Type::Unknown, Ast::Var(ident), Some((assign_ident, _)), Some(function_type)) = (
+        called_type.clone(),
+        &*(expr.clone()),
+        &ctx.assignment_ctx,
+        ctx.current_function_type.clone(),
+    ) {
+        if ident == assign_ident {
+            // RECURSION ALERT
+            called_type = function_type;
+        }
+    }
+
+    match called_type {
+        Type::Function {
+            args: arg_types,
+            is_variadic,
+            returns,
+            mut generics,
+        } => {
+            // If there is a surrounding function type context (like if this function is an argument to
+            // a surrounding function), we inherit its generics definitions where we dont make our own
+            if let Some(Type::Function {
+                generics: surrounding_generics,
+                ..
+            }) = &ctx.current_function_type
+            {
+                for (k, v) in surrounding_generics.iter() {
+                    generics.entry(k.to_string()).or_insert(v.clone());
+                }
+            }
+
+            // Compare arguments length against the type.
+            // If the type is not variadic, they len's should be the same.
+            if args.len() != arg_types.len() {
+                if !is_variadic {
+                    panic!(
+                        "wrong amount of arguments. want: {:?}, got: {:?}",
+                        &arg_types.len(),
+                        &args.len()
+                    );
+                // If it is, we ensure that all arguments after the last arg type are the same
+                } else {
+                    for (idx, (_, ty)) in args_with_types[(arg_types.len() - 1)..args.len() - 1]
+                        .iter()
+                        .enumerate()
+                    {
+                        if arg_types.last().unwrap() != ty {
+                            panic!(
+                                "wrong type in arg nr {}! wants {:?}, got {:?}",
+                                idx,
+                                arg_types.last(),
+                                ty
+                            )
+                        }
+                    }
+                }
+            }
+
+            // let mut bindings = hashbrown::HashMap::new();
+
+            // // Typecheck arguments
+            // // `r#type` = wanted type, `arg_type` = supplied type
+            // for (idx, wanted_type) in arg_types.into_iter().enumerate() {
+            //     let supplied_type = args_with_types[idx].1.clone();
+
+            //     // If variable is in generics, match the supplied type against its constraints
+            //     // If its not in generics but is in Types map,
+            //     match resolve_binding(
+            //         &mut generics,
+            //         &mut bindings,
+            //         &mut program.compiler_stack,
+            //         compiler,
+            //         wanted_type.clone(),
+            //         Some(&supplied_type),
+            //     ) {
+            //         Err(e) => {
+            //             panic!(
+            //                 "wrong type in arg nr {}! wants {:?}, got {:?}",
+            //                 idx, wanted_type, supplied_type
+            //             );
+            //         }
+            //         Ok(_) => {}
+            //     }
+            // }
+
+            // match resolve_binding(
+            //     &mut generics,
+            //     &mut bindings,
+            //     &mut program.compiler_stack,
+            //     compiler,
+            //     *returns.clone(),
+            //     None,
+            // ) {
+            //     Err(e) => {
+            //         panic!("fucked up the return type bruv");
+            //     }
+            //     Ok(ty) => {
+            //         return_type = ty.clone();
+            //     }
+            // }
+
+            bytecode.append(&mut bc);
+            bytecode.push(Op::Call as u8);
+            bytecode.push(u8::try_from(args.len()).unwrap());
+
+            Ok((bytecode, *returns))
+        }
+        _ => panic!("attempted to call a non function???"),
+    }
+}
+
+/// Declares a new function.
+fn function(
+    ctx: &mut Context,
+    is_variadic: &bool,
+    args: &Vec<(String, Type)>,
+    returns: &Type,
+    body: &Box<Ast>,
+    mut generics: HashMap<String, Type>,
+) -> Result<(Vec<u8>, Type)> {
+    // If there is a surrounding function type context (like if this function is an argument to
+    // a surrounding function), we inherit its generics definitions where we dont make our own
+    if let Some(Type::Function {
+        generics: ref surrounding_generics,
+        ..
+    }) = ctx.current_function_type
+    // TODO this can likely be put in the Scopes
+    {
+        dbg!(&surrounding_generics);
+        for (k, v) in surrounding_generics.iter() {
+            generics.entry(k.to_string()).or_insert(v.clone());
+        }
+    }
+
+    let ty = Type::Function {
+        args: args.iter().map(|a| a.1.clone()).collect(),
+        returns: Box::new(returns.clone()),
+        is_variadic: *is_variadic,
+        generics,
+    };
+
+    let current_function_type_copy = ctx.current_function_type.clone();
+    ctx.current_function_type = Some(ty.clone());
+
+    let mut scope = Scope::default();
+    // TODO add implicit self arg as local variable to this scope
+    for (arg_name, arg_type) in args.iter() {
+        scope.locals.push(LocalVariable {
+            name: arg_name.clone(),
+            is_mutable: false,
+            scope_depth: ctx.scopes.len() + 1,
+            is_captured: false,
+            r#type: arg_type.clone(),
+        })
+    }
+    ctx.scopes.push(scope);
+
+    let (func_bytecode, _actually_returns) = compile(ctx, body)?;
+
+    ctx.scopes.pop();
+
+    // TODO typecheck returns
+    // if the provided return type is more loose than the actually_returns type, overwrite it
+
+    // If the function ends with a return statement from a Block expression [..., Return, 0_u8, _],
+    // we can safely remove that since we're providing our own Return opcode from the function.
+    //let last_three = &func_bytecode[func_bytecode.len() - 3..func_bytecode.len() - 1];
+    //if last_three == &[OpCode::Return as u8, 0_u8] {
+    //    func_bytecode.truncate(func_bytecode.len() - 3);
+    //}
+
+    ctx.current_function_type = current_function_type_copy;
+
+    let mut is_method = false;
+    for parent in ctx.lineage.iter().rev() {
+        if matches!(
+            parent,
+            &Ast::Type {
+                decl: TypeDecl::Struct { .. },
+                ..
+            }
+        ) {
+            is_method = true;
+            break;
+        }
+    }
+
+    // TODO upvalues
+    let function = Value::Function(Function {
+        is_variadic: *is_variadic,
+        is_method,
+        arity: args.len(),
+        bytecode: func_bytecode,
+        upvalue_count: 0_u8,
+        upvalues: vec![],
+        upvalues_bytecode: vec![],
+    });
+
+    let (function_bytecode, _) = compile(ctx, &Ast::Value(function))?;
+
+    Ok((function_bytecode, ty))
+}
+
 /// Expresses a binary operation such as 1 + 1, a == b, 9 > 8, etc.
 /// Requres the two expressions to be of the same type.
 fn infix(ctx: &mut Context, a: &Box<Ast>, op: &Operator, b: &Box<Ast>) -> Result<(Vec<u8>, Type)> {
     let (mut bytecode, a_type) = compile(ctx, a)?;
-    let (mut bytecode_b, b_type) = compile(ctx, b)?;
+    let (mut bytecode_b, _b_type) = compile(ctx, b)?;
 
-    if !a_type.allowed_infix_operators(&b_type).contains(op) {
-        panic!(
-            "infix op {:?} not allowed between {:?} and {:?}",
-            op, a_type, b_type
-        );
-    }
+    // if !a_type.allowed_infix_operators(&b_type).contains(op) {
+    //     panic!(
+    //         "infix op {:?} not allowed between {:?} and {:?}",
+    //         op, a_type, b_type
+    //     );
+    // }
 
-    if !a_type.is_numeric() || !b_type.is_numeric() {
-        // Handle string concat or mul,
-        // list concats etc by mapping against builtin functions for dealing with that stuff
-        todo!();
-    }
+    // if !a_type.is_numeric() || !b_type.is_numeric() {
+    //     // Handle string concat or mul,
+    //     // list concats etc by mapping against builtin functions for dealing with that stuff
+    //     todo!();
+    // }
 
     bytecode.append(&mut bytecode_b);
     bytecode.push(Op::Binary as u8);
@@ -240,15 +490,22 @@ fn member(_ctx: &mut Context, _container: &Box<Ast>, _key: &Box<Ast>) -> Result<
     Ok((vec![], Type::Unknown))
 }
 
+///
+fn return_(ctx: &mut Context, expr: &Box<Ast>) -> Result<(Vec<u8>, Type)> {
+    let (mut bytecode, ty) = compile(ctx, expr)?;
+    bytecode.push(Op::Return as u8);
+    Ok((bytecode, ty))
+}
+
 /// Compiles a statement and optionally the rest of the program.
 fn statement(
     ctx: &mut Context,
     stmt: Box<Ast>,
     rest: Box<Ast>,
-    span: &Range<usize>,
+    _span: &Range<usize>,
 ) -> Result<(Vec<u8>, Type)> {
     if let Ast::Nop = *rest {
-        let (mut bytecode, ty) = compile(ctx, &stmt)?;
+        let (bytecode, ty) = compile(ctx, &stmt)?;
         let return_type = if let Ast::Return { .. } = *stmt {
             ty
         } else {
@@ -268,10 +525,10 @@ fn decl_type(
     ctx: &mut Context,
     name: &str,
     decl: &TypeDecl,
-    span: &Range<usize>,
+    _span: &Range<usize>,
 ) -> Result<(Vec<u8>, Type)> {
     let ty = match decl {
-        TypeDecl::Enum { variants, generics } => Type::Enum(variants.clone()),
+        TypeDecl::Enum { variants, generics: _ } => Type::Enum(variants.clone()),
         // TypeDecl::Interface { properties } => Type::Interface {
         //     name: name.to_string(),
         //     properties: properties
@@ -397,10 +654,12 @@ fn let_(
     ident: &str,
     annotated_type: &Option<Type>,
     expr: &Box<Ast>,
-    span: &Range<usize>,
+    _span: &Range<usize>,
 ) -> Result<(Vec<u8>, Type)> {
     // Create a new local var of type `ty`
     let ty = annotated_type.clone().unwrap_or(Type::Unknown);
+    let old_assignment_ctx = ctx.assignment_ctx.clone();
+    ctx.assignment_ctx = Some((ident.to_owned(), ty.clone()));
     let local_variable = LocalVariable {
         name: ident.to_string(),
         scope_depth: ctx.scopes.len(),
@@ -410,7 +669,7 @@ fn let_(
     };
     ctx.scope()?.locals.push(local_variable);
 
-    let (mut assignment_bytes, mut assignment_type) = compile(ctx, expr)?;
+    let (assignment_bytes, mut assignment_type) = compile(ctx, expr)?;
 
     // If the original type is Unknown, update the local var with the assignment type
     // If it isn't, conduct a type check.
@@ -430,6 +689,7 @@ fn let_(
         }
     }
 
+    ctx.assignment_ctx = old_assignment_ctx;
     Ok((assignment_bytes, assignment_type))
 }
 
@@ -466,7 +726,6 @@ fn value(ctx: &mut Context, value: &Value) -> Result<(Vec<u8>, Type)> {
 fn var(ctx: &mut Context, ident: &String) -> Result<(Vec<u8>, Type)> {
     // Find a local var with the right name, get its index
     let mut local_variable = None;
-    let mut is_actually_builtin = false;
 
     // First check all variables local to us
     for (i, local) in ctx.scope()?.locals.iter().enumerate() {
@@ -491,6 +750,7 @@ fn var(ctx: &mut Context, ident: &String) -> Result<(Vec<u8>, Type)> {
         bytecode.push(upvalue)
     } else */
     {
+        dbg!(&ident, &ctx.scope()?.locals);
         todo!();
         // If we dont find a variable with this name, it may be an Enum type
         // used in an Entry/Call expression.

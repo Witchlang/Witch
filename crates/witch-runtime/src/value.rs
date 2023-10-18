@@ -1,7 +1,7 @@
 use alloc::{string::String, vec, vec::Vec};
 use serde::{Deserialize, Serialize};
 
-use crate::{vm::Op, stack::Pointer};
+use crate::{stack::Pointer, vm::Op};
 
 #[cfg_attr(debug_assertions, derive(Debug))]
 #[derive(Serialize, Deserialize, PartialEq, Clone)]
@@ -12,6 +12,7 @@ pub enum Value {
     Bool(bool),
     String(String),
     List(Vec<Self>),
+    Function(Function),
     I8(i8),
     U8(u8),
     I16(i16),
@@ -28,7 +29,7 @@ pub enum Value {
     F32(f32),
     F64(f64),
     #[serde(skip)]
-    Pointer(Pointer)
+    Pointer(Pointer),
 }
 
 #[cfg_attr(debug_assertions, derive(Debug))]
@@ -37,6 +38,7 @@ pub enum Error {
     InvalidOp(Op),
 }
 
+#[cfg_attr(debug_assertions, derive(Debug))]
 #[derive(Serialize, Deserialize, PartialEq, Clone)]
 pub struct Function {
     pub is_variadic: bool,

@@ -50,6 +50,8 @@ pub enum Op {
     Set,
 
     Binary,
+    Return,
+    Call,
 
     Crash,
 }
@@ -67,6 +69,8 @@ impl core::convert::From<u8> for Op {
             6 => Op::Set,
 
             7 => Op::Binary,
+            8 => Op::Return,
+            9 => Op::Call,
             _ => Op::Crash,
         }
     }
@@ -74,7 +78,7 @@ impl core::convert::From<u8> for Op {
 
 #[derive(Clone, Copy)]
 pub struct CallFrame {
-    pub function_ptr: usize,
+    pub ptr: Pointer,
     pub ip: usize,
     stack_start: usize,
 }
@@ -121,27 +125,48 @@ impl Vm {
 
     /// Retrieves the byte which the instruction pointer is currently pointing at.
     fn current_byte(&self) -> u8 {
-        self.functions[self.frame().function_ptr].bytecode[self.frame().ip]
+        self.deref_function(self.frame().ptr).bytecode[self.frame().ip]
     }
 
     /// Retrieves the byte which is after the byte that the instruction pointer is currently pointing at.
     fn next_byte(&self) -> u8 {
-        self.functions[self.frame().function_ptr].bytecode[self.frame().ip + 1]
+        self.deref_function(self.frame().ptr).bytecode[self.frame().ip + 1]
     }
 
     /// Retrieves the next 8 bytes from the current instruction pointer.
     fn next_eight_bytes(&self) -> [u8; 8] {
-        self.functions[self.frame().function_ptr].bytecode
+        self.deref_function(self.frame().ptr).bytecode
             [self.frame().ip + 1..self.frame().ip + 1 + 8]
             .try_into()
             .unwrap()
     }
 
-    fn deref(&mut self, ptr: Pointer) -> &mut Value {
+    fn deref(&self, ptr: Pointer) -> &Value {
         match ptr {
             Pointer::Heap(idx) => self.heap.get(idx),
-            _ => todo!()
+            _ => todo!(),
         }
+    }
+
+    fn deref_function(&self, ptr: Pointer) -> &Function {
+        if let Value::Function(f) = self.deref(ptr) {
+            return f;
+        }
+        unreachable!()
+    }
+
+        pub fn push_callframe(&mut self, ptr: Pointer, offset: usize) {
+            if let Value::Function(f) = self.deref(ptr) {
+                let frame = CallFrame {
+                    ip: 0,
+                    stack_start: self.stack.len() - f.arity,
+                    ptr,
+                };
+        
+                self.frame_mut().ip = self.frame().ip + offset; // One to advance the instruction pointer, plus one offset for the arg_len
+                self.frames.push(frame);
+            }
+        
     }
 
     pub fn run(&mut self, bytecode: Vec<u8>) -> Result<Value, Value> {
@@ -153,7 +178,7 @@ impl Vm {
             return Ok(Value::Void);
         }
 
-        self.functions.push(crate::value::Function {
+        let ptr = self.heap.insert(Value::Function(crate::value::Function {
             is_variadic: false,
             is_method: false,
             arity: 0,
@@ -161,11 +186,11 @@ impl Vm {
             upvalue_count: 0,
             upvalues: vec![],
             upvalues_bytecode: vec![],
-        });
+        }));
         let frame = CallFrame {
             ip: 0,
             stack_start: 0,
-            function_ptr: 0,
+            ptr,
         };
         self.frames.push(frame);
 
@@ -209,7 +234,7 @@ impl Vm {
             // we implicitly return from the current call frame by popping self.frames.
             //
             // If there are no more frames left, we break the loop and move to the return down below.
-            if self.frame().ip > self.functions[self.frame().function_ptr].bytecode.len() - 1 {
+            if self.frame().ip > self.deref_function(self.frame().ptr).bytecode.len() - 1 {
                 if self.frames.pop().is_none()
                     || (self.frames.len() > 1 && self.frames.len() - 1 < bottom_frame)
                 {
@@ -223,7 +248,7 @@ impl Vm {
             let opcode_timer_start = std::time::Instant::now();
 
             let op = Op::from(self.current_byte());
-            let offset;
+            let mut offset = 0;
             let forward = true;
 
             dbg!(&op);
@@ -243,16 +268,24 @@ impl Vm {
                     for e in items.iter().rev() {
                         self.cache.push(*e);
                     }
-                    
+
                     offset = 8;
                 }
                 Op::SetupFunctionCache => {
                     let num_items_bytes = self.next_eight_bytes();
                     let num_items = usize::from_ne_bytes(num_items_bytes);
-                    // for _ in 0..num_items {
-                    //     let v = self.stack.pop().unwrap();
-                    //     self.functions.push(v);
-                    // }
+                    let mut items = vec![];
+                    for _ in 0..num_items {
+                        items.push(self.stack.pop().unwrap());
+                    }
+                    for e in items.iter().rev() {
+                        if let Entry::Pointer(p) = *e {
+                            let value = self.deref(p).clone();
+                            if let Value::Function(f) = value {
+                                self.functions.push(f.to_owned());
+                            }
+                        }
+                    }
                     offset = 8;
                 }
 
@@ -263,31 +296,9 @@ impl Vm {
                     offset = 1;
                 }
 
-                Op::Set => {
-                    let idx = self.next_byte();
-                    let stackentry = self.stack.pop().unwrap();
+                
 
-                    let stack_idx = self.frame().stack_start + idx as usize;
-                    if stack_idx == self.stack.len() {
-                        self.stack.push(stackentry);
-                    } else {
-                        // // Edge case: Dylibs need runtime type tracking, and will assume the type
-                        // // which is declared in the uninitialized value already on the stack.
-                        // if let (Value::Uninitialized(ty), Value::Dylib(dy)) =
-                        //     (self.stack[stack_idx].into(), stackentry.into())
-                        // {
-                        //     dbg!(&ty);
-                        //     let mut new_dy = dy.clone();
-                        //     new_dy.r#type = ty.clone();
-                        //     stackentry =
-                        //         StackEntry::Pointer(self.heap.insert(Value::Dylib(new_dy)));
-                        // }
-                        self.stack.set(stack_idx, stackentry);
-                    }
-                    offset = 1;
-                }
-
-                // Conducts a binary operation between the two top entries on the stack. 
+                // Conducts a binary operation between the two top entries on the stack.
                 // The right-hand side is popped off the stack, while the left-hand side is edited
                 // in place with the result.
                 Op::Binary => {
@@ -309,10 +320,11 @@ impl Vm {
                 Op::Push => {
                     let value_length_bytes: [u8; 8] = self.next_eight_bytes();
                     let value_length = usize::from_ne_bytes(value_length_bytes);
-                    let value_bytes = &self.functions[self.frame().function_ptr].bytecode
-                        [(&self.frame().ip + 9)..(&self.frame().ip + 9 + value_length)];
+                    let ip = self.frame().ip;
+                    let value_bytes = &self.deref_function(self.frame().ptr).bytecode
+                        [(ip + 9)..(ip + 9 + value_length)];
 
-                    let (mut value, _): (Value, usize) =
+                    let (value, _): (Value, usize) =
                         bincode::serde::decode_from_slice(value_bytes, bincode::config::legacy())
                             .unwrap();
 
@@ -356,14 +368,69 @@ impl Vm {
 
                     offset = 8 + value_length;
                 }
+
                 Op::Get => {
                     let b = self.next_byte();
                     let entry = self.stack.get(self.frame().stack_start + b as usize);
-                    self.stack
-                        .push(entry);
+                    self.stack.push(entry);
 
                     offset = 1;
                 }
+
+                Op::Set => {
+                    let idx = self.next_byte();
+                    let stackentry = self.stack.pop().unwrap();
+
+                    let stack_idx = self.frame().stack_start + idx as usize;
+                    if stack_idx == self.stack.len() {
+                        self.stack.push(stackentry);
+                    } else {
+                        // // Edge case: Dylibs need runtime type tracking, and will assume the type
+                        // // which is declared in the uninitialized value already on the stack.
+                        // if let (Value::Uninitialized(ty), Value::Dylib(dy)) =
+                        //     (self.stack[stack_idx].into(), stackentry.into())
+                        // {
+                        //     dbg!(&ty);
+                        //     let mut new_dy = dy.clone();
+                        //     new_dy.r#type = ty.clone();
+                        //     stackentry =
+                        //         StackEntry::Pointer(self.heap.insert(Value::Dylib(new_dy)));
+                        // }
+                        self.stack.set(stack_idx, stackentry);
+                    }
+                    offset = 1;
+                }
+
+                // Pops the current callframe, truncates the stack to its original size
+                // and puts the return value on top of it.
+                Op::Return => {
+                    let frame = self.frames.pop().unwrap();
+                    let result = self.stack.pop().unwrap();
+                    self.stack.truncate(frame.stack_start);
+                    self.stack.push(result);
+                    continue;
+                }
+
+                Op::Call => {
+                    let _arg_len = self.next_byte();
+                    let entry = self.stack.pop().unwrap();
+
+                    if let Entry::Pointer(ptr) = entry {
+
+                        // todo support variadic funcs using arg_len
+
+                        self.push_callframe(ptr, 2);
+                        continue;
+                    } else {
+                        unreachable!()
+                    }
+
+                    //todo support native functions
+
+                    offset = 1;
+
+                }
+
                 x => {
                     return Err(Value::Error(crate::value::Error::InvalidOp(x)));
                 }
@@ -389,7 +456,7 @@ impl Vm {
         if let Some(entry) = self.stack.pop() {
             let value = match entry.into() {
                 Value::Pointer(p) => self.deref(p).to_owned(),
-                v => v
+                v => v,
             };
             Ok(value)
         } else {

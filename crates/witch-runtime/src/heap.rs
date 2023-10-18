@@ -1,6 +1,6 @@
 use slab::Slab;
 
-use crate::{value::Value, stack::Pointer};
+use crate::{stack::Pointer, value::Value};
 
 #[derive(Default)]
 pub struct Heap {
@@ -12,8 +12,8 @@ impl Heap {
         Pointer::Heap(self.mem.insert(value))
     }
 
-    pub fn get(&mut self, key: usize) -> &mut Value {
-        self.mem.get_mut(key).unwrap()
+    pub fn get(&self, key: usize) -> &Value {
+        self.mem.get(key).unwrap()
     }
 }
 

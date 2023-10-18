@@ -1,7 +1,7 @@
 use core::hash::{Hash, Hasher};
 use core::mem::discriminant;
 use std::collections::HashMap;
-use witch_runtime::value::Value;
+use witch_runtime::value::{Value};
 
 use crate::parser::ast::{Ast, Operator};
 
@@ -298,7 +298,8 @@ impl From<&Value> for Type {
                 }
             }
             Value::String(_) => Type::String,
-            _ => todo!(),
+            Value::Function(_) => Type::Unknown,
+            x => todo!("{:?}", x),
         }
     }
 }

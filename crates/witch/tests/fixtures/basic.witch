@@ -1,10 +1,10 @@
 let x = 1 + 2 * 5 - 5
-let y = x + 1;
+let y = x + 1 - 2;
 
 let ho = "string"
 
-#function id<T>(self: T) -> T {
-#   return self
-#}
+function id<T>(self: T) -> T {
+   return self + 2
+}
 
-#id(y)
+id(y) * 2

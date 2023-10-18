@@ -28,6 +28,7 @@ pub enum Entry {
     Pointer(Pointer),
 }
 
+
 impl From<Entry> for Value {
     fn from(entry: Entry) -> Self {
         match entry {
@@ -74,5 +75,9 @@ impl Stack {
 
     pub fn len(&self) -> usize {
         self.data.len()
+    }
+
+    pub fn truncate(&mut self, len: usize) {
+        self.data.truncate(len);
     }
 }

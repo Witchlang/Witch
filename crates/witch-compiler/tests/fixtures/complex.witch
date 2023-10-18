@@ -34,15 +34,6 @@ struct Bar {
 }
 
 
-function test() -> any {
-    run_thing()
-    let x = foo
-      .map()
-      .bar()
-    x
-}
-
-
 struct Foo {
     maybe_bar: Option<Bar>
 }
