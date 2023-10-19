@@ -27,6 +27,26 @@ pub enum Operator {
 }
 
 impl Operator {
+    pub fn resulting_type(&self, lhs: Type) -> Type {
+        match self {
+            Operator::Add
+            | Operator::Sub
+            | Operator::Mul
+            | Operator::Div
+            | Operator::Mod
+            | Operator::Pow => lhs,
+            Operator::Lt
+            | Operator::Gt
+            | Operator::Lte
+            | Operator::Gte
+            | Operator::NotEq
+            | Operator::Eq
+            | Operator::And
+            | Operator::Or
+            | Operator::Bang => Type::Bool,
+        }
+    }
+
     pub fn prefix_binding(&self) -> ((), u8) {
         match self {
             Operator::Add | Operator::Sub | Operator::Bang => ((), 51),
@@ -165,9 +185,10 @@ pub enum Ast {
 
     // An if expression conditionally runs the `then_` or `else_` branch depending on the predicate expression.
     If {
-        predicate: Box<Spanned<Self>>,
-        then_: Box<Spanned<Self>>,
-        else_: Box<Spanned<Self>>,
+        predicate: Box<Self>,
+        then_: Box<Self>,
+        else_: Box<Self>,
+        span: Range<usize>,
     },
 
     // Expresses a `while` loop. (Condition, Block)

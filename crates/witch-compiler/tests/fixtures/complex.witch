@@ -45,7 +45,7 @@ function new_foo<T>(maybe_bar: Option<T>) where T: Calc -> Foo {
 }
 
 
-let foo = new_foo(Option.Some(Bar { field: 5 }))
+let foo = new_foo(Option<-Some(Bar { field: 5 }))
 
 interface Iterator<T> {
     next: () -> Option<T>

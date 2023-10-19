@@ -28,7 +28,7 @@ pub struct Scope {
 }
 
 #[derive(Debug, Default, Clone)]
-struct Cached {
+pub struct Cached {
     bytecode: Vec<u8>,
     flushed: bool,
 }
@@ -146,7 +146,11 @@ pub fn compile<'a>(ctx: &mut Context, ast: &Ast) -> Result<(Vec<u8>, Type)> {
 
     let (bytecode, return_type) = match &ast {
         Ast::Assignment { ident, expr, span } => assignment(ctx, ident, expr, span)?,
-        Ast::Call { expr, args, span: _ } => call(ctx, expr, args)?,
+        Ast::Call {
+            expr,
+            args,
+            span: _,
+        } => call(ctx, expr, args)?,
         Ast::Function {
             is_variadic,
             args,
@@ -154,6 +158,12 @@ pub fn compile<'a>(ctx: &mut Context, ast: &Ast) -> Result<(Vec<u8>, Type)> {
             body,
             generics,
         } => function(ctx, is_variadic, args, returns, body, generics.clone())?,
+        Ast::If {
+            predicate,
+            then_,
+            else_,
+            span,
+        } => if_(ctx, predicate, then_, else_)?,
         Ast::Infix { lhs, op, rhs, .. } => infix(ctx, lhs, op, rhs)?,
         //  Ast::Member { container, key } => member(ctx, container, key)?,
         Ast::Let {
@@ -458,18 +468,54 @@ fn function(
     Ok((function_bytecode, ty))
 }
 
+/// If is implemented by utilizing the Jump and JumpIfFalse opcodes. We evaluate the two expressions and
+/// get the length of their bytecode instructions. If the Predicate expression is false, we jump over the
+/// Then expression length straight to the Else statement. If the Predicate is true, we fall through to the
+/// Then expression and subsequently Jump over the Else expression.
+fn if_(
+    ctx: &mut Context,
+    predicate: &Box<Ast>,
+    then_: &Box<Ast>,
+    else_: &Box<Ast>,
+) -> Result<(Vec<u8>, Type)> {
+    let (mut predicate_bytecode, predicate_ty) = compile(ctx, predicate)?;
+    if !matches!(predicate_ty, Type::Bool) {
+        panic!("predicate expression must return a boolean value");
+    }
+    let (mut then_bytecode, then_ty) = compile(ctx, then_)?;
+    let (mut else_bytecode, else_ty) = compile(ctx, else_)?;
+
+    let mut bytecode = vec![];
+
+    bytecode.append(&mut predicate_bytecode);
+    bytecode.push(Op::JumpIfFalse as u8);
+
+    // Jump the size of the Then statement + this len value + one more instruction
+    let mut then_len = (then_bytecode.len() + 8 + 1).to_ne_bytes().to_vec();
+    bytecode.append(&mut then_len);
+
+    bytecode.append(&mut then_bytecode);
+    bytecode.push(Op::Jump as u8);
+    let mut else_len = (else_bytecode.len() + 8).to_ne_bytes().to_vec();
+
+    bytecode.append(&mut else_len);
+    bytecode.append(&mut else_bytecode);
+
+    Ok((bytecode, Type::Void))
+}
+
 /// Expresses a binary operation such as 1 + 1, a == b, 9 > 8, etc.
 /// Requres the two expressions to be of the same type.
 fn infix(ctx: &mut Context, a: &Box<Ast>, op: &Operator, b: &Box<Ast>) -> Result<(Vec<u8>, Type)> {
     let (mut bytecode, a_type) = compile(ctx, a)?;
-    let (mut bytecode_b, _b_type) = compile(ctx, b)?;
+    let (mut bytecode_b, b_type) = compile(ctx, b)?;
 
-    // if !a_type.allowed_infix_operators(&b_type).contains(op) {
-    //     panic!(
-    //         "infix op {:?} not allowed between {:?} and {:?}",
-    //         op, a_type, b_type
-    //     );
-    // }
+    if !a_type.allowed_infix_operators(&b_type).contains(op) {
+        panic!(
+            "infix op {:?} not allowed between {:?} and {:?}",
+            op, a_type, b_type
+        );
+    }
 
     // if !a_type.is_numeric() || !b_type.is_numeric() {
     //     // Handle string concat or mul,
@@ -477,11 +523,13 @@ fn infix(ctx: &mut Context, a: &Box<Ast>, op: &Operator, b: &Box<Ast>) -> Result
     //     todo!();
     // }
 
+    let return_type = op.resulting_type(a_type);
+
     bytecode.append(&mut bytecode_b);
     bytecode.push(Op::Binary as u8);
     bytecode.push(op.to_owned() as u8);
 
-    Ok((bytecode, a_type))
+    Ok((bytecode, return_type))
 }
 
 /// Accesses a member within an Object or Vector, by first putting the backing Object
@@ -528,7 +576,10 @@ fn decl_type(
     _span: &Range<usize>,
 ) -> Result<(Vec<u8>, Type)> {
     let ty = match decl {
-        TypeDecl::Enum { variants, generics: _ } => Type::Enum(variants.clone()),
+        TypeDecl::Enum {
+            variants,
+            generics: _,
+        } => Type::Enum(variants.clone()),
         // TypeDecl::Interface { properties } => Type::Interface {
         //     name: name.to_string(),
         //     properties: properties
@@ -647,8 +698,7 @@ fn decl_type(
     Ok((vec![], ty))
 }
 
-/// Assigns a local variable by setting its new value without initializing it.
-/// It needs to either be mutable or the parent expr needs to be `Ast::Let`.
+/// Creates a new local variable.
 fn let_(
     ctx: &mut Context,
     ident: &str,
@@ -706,17 +756,8 @@ fn value(ctx: &mut Context, value: &Value) -> Result<(Vec<u8>, Type)> {
     value_bytecode.append(&mut bytes);
 
     let return_type = Type::from(value);
-    let bc = if let &Type::Function { .. } = &return_type {
-        let idx = ctx.cache_fn(value_bytecode);
-        [
-            vec![Op::GetFunction as u8],
-            (idx as u8).to_ne_bytes().to_vec(),
-        ]
-        .concat()
-    } else {
-        let idx = ctx.cache_value(value_bytecode);
-        [vec![Op::GetValue as u8], (idx as u8).to_ne_bytes().to_vec()].concat()
-    };
+    let idx = ctx.cache_value(value_bytecode);
+    let bc = [vec![Op::GetValue as u8], (idx as u8).to_ne_bytes().to_vec()].concat();
 
     Ok((bc, return_type))
 }

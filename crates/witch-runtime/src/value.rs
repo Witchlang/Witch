@@ -28,8 +28,6 @@ pub enum Value {
     Char(char),
     F32(f32),
     F64(f64),
-    #[serde(skip)]
-    Pointer(Pointer),
 }
 
 #[cfg_attr(debug_assertions, derive(Debug))]

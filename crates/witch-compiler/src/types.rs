@@ -1,7 +1,7 @@
 use core::hash::{Hash, Hasher};
 use core::mem::discriminant;
 use std::collections::HashMap;
-use witch_runtime::value::{Value};
+use witch_runtime::value::Value;
 
 use crate::parser::ast::{Ast, Operator};
 
@@ -313,6 +313,7 @@ impl Type {
                 Operator::Div,
                 Operator::Mul,
                 Operator::Mod,
+                Operator::Lt,
             ],
             (Type::String, Type::Usize) => vec![Operator::Mul],
             _ => vec![],

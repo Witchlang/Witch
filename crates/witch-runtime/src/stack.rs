@@ -14,9 +14,6 @@ pub enum Pointer {
 
     /// Refers to a stack entry within the value cache
     Cache(usize),
-
-    /// Refers to a function within our list of compiled functions
-    Function(usize),
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -28,14 +25,12 @@ pub enum Entry {
     Pointer(Pointer),
 }
 
-
 impl From<Entry> for Value {
     fn from(entry: Entry) -> Self {
         match entry {
             Entry::Bool(b) => Value::Bool(b),
             Entry::Usize(i) => Value::Usize(i),
             Entry::Void => Value::Void,
-            Entry::Pointer(p) => Value::Pointer(p),
             x => todo!("{:?}", x),
         }
     }

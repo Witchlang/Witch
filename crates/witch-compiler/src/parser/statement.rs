@@ -97,6 +97,15 @@ pub fn statement<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<Ast> {
                 span: start..end,
             }
         }
+        Some(Kind::KwIf) => {
+            let if_else = if_else(p)?;
+            let end = p.cursor;
+            Ast::Statement {
+                stmt: Box::new(if_else),
+                rest: Box::new(statement(p)?),
+                span: start..end,
+            }
+        }
         Some(Kind::At) => annotation(p)?,
         Some(_) => {
             let expr = expression(p)?;
@@ -128,7 +137,7 @@ fn assignment<'input>(
     let ident = p.text(&token).to_string();
 
     let annotated_type = if p.at(Kind::Colon) {
-        p.consume(&Kind::Colon);
+        let _ = p.consume(&Kind::Colon)?;
         Some(type_literal(p)?)
     } else {
         None
@@ -147,6 +156,45 @@ fn assignment<'input>(
             span: start..p.cursor,
         },
     ))
+}
+
+/// Parses an if statement with an optional else statement afterwards.
+/// # Example
+/// ```no
+/// if predicate == true {
+///     then_this()
+/// } else {
+///     else_this()
+/// }
+///
+/// # or
+/// if !predicate {
+///     only_then()
+/// }
+/// #...
+/// ```
+fn if_else<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<Ast> {
+    let start = p.cursor;
+    let _ = p.consume(&Kind::KwIf)?;
+    let predicate = Box::new(expression(p)?);
+    let _ = p.consume(&Kind::LBrace)?;
+    let then_ = Box::new(statement(p)?);
+    let _ = p.consume(&Kind::RBrace)?;
+    let mut else_ = Box::new(Ast::Nop);
+
+    if p.at(Kind::KwElse) {
+        let _ = p.consume(&Kind::KwElse)?;
+        let _ = p.consume(&Kind::LBrace)?;
+        else_ = Box::new(statement(p)?);
+        let _ = p.consume(&Kind::RBrace)?;
+    }
+
+    Ok(Ast::If {
+        predicate,
+        then_,
+        else_,
+        span: start..p.cursor,
+    })
 }
 
 fn annotation<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<Ast> {

@@ -49,6 +49,9 @@ pub enum Op {
     Get,
     Set,
 
+    Jump,
+    JumpIfFalse,
+
     Binary,
     Return,
     Call,
@@ -68,9 +71,12 @@ impl core::convert::From<u8> for Op {
             5 => Op::Get,
             6 => Op::Set,
 
-            7 => Op::Binary,
-            8 => Op::Return,
-            9 => Op::Call,
+            7 => Op::Jump,
+            8 => Op::JumpIfFalse,
+
+            9 => Op::Binary,
+            10 => Op::Return,
+            11 => Op::Call,
             _ => Op::Crash,
         }
     }
@@ -135,8 +141,7 @@ impl Vm {
 
     /// Retrieves the next 8 bytes from the current instruction pointer.
     fn next_eight_bytes(&self) -> [u8; 8] {
-        self.deref_function(self.frame().ptr).bytecode
-            [self.frame().ip + 1..self.frame().ip + 1 + 8]
+        self.deref_function(self.frame().ptr).bytecode[self.frame().ip + 1..self.frame().ip + 1 + 8]
             .try_into()
             .unwrap()
     }
@@ -155,18 +160,17 @@ impl Vm {
         unreachable!()
     }
 
-        pub fn push_callframe(&mut self, ptr: Pointer, offset: usize) {
-            if let Value::Function(f) = self.deref(ptr) {
-                let frame = CallFrame {
-                    ip: 0,
-                    stack_start: self.stack.len() - f.arity,
-                    ptr,
-                };
-        
-                self.frame_mut().ip = self.frame().ip + offset; // One to advance the instruction pointer, plus one offset for the arg_len
-                self.frames.push(frame);
-            }
-        
+    pub fn push_callframe(&mut self, ptr: Pointer, offset: usize) {
+        if let Value::Function(f) = self.deref(ptr) {
+            let frame = CallFrame {
+                ip: 0,
+                stack_start: self.stack.len() - f.arity,
+                ptr,
+            };
+
+            self.frame_mut().ip = self.frame().ip + offset; // One to advance the instruction pointer, plus one offset for the arg_len
+            self.frames.push(frame);
+        }
     }
 
     pub fn run(&mut self, bytecode: Vec<u8>) -> Result<Value, Value> {
@@ -296,8 +300,6 @@ impl Vm {
                     offset = 1;
                 }
 
-                
-
                 // Conducts a binary operation between the two top entries on the stack.
                 // The right-hand side is popped off the stack, while the left-hand side is edited
                 // in place with the result.
@@ -416,7 +418,6 @@ impl Vm {
                     let entry = self.stack.pop().unwrap();
 
                     if let Entry::Pointer(ptr) = entry {
-
                         // todo support variadic funcs using arg_len
 
                         self.push_callframe(ptr, 2);
@@ -428,7 +429,6 @@ impl Vm {
                     //todo support native functions
 
                     offset = 1;
-
                 }
 
                 x => {
@@ -454,9 +454,9 @@ impl Vm {
 
         // When the script exits, return whatever is on the top of the stack
         if let Some(entry) = self.stack.pop() {
-            let value = match entry.into() {
-                Value::Pointer(p) => self.deref(p).to_owned(),
-                v => v,
+            let value = match entry {
+                Entry::Pointer(p) => self.deref(p).to_owned(),
+                v => v.into(),
             };
             Ok(value)
         } else {
