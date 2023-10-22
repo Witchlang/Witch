@@ -10,12 +10,19 @@ use crate::types::{Type, TypeDecl};
 use witch_runtime::value::Function;
 use witch_runtime::{value::Value, vm::Op};
 
+#[derive(Debug, Clone)]
+pub struct Upvalue {
+    index: usize,
+
+    // Whether the index refers to a local variable, or an upvalue in the parent scope
+    is_local: bool,
+}
+
 /// Contains all compile-time information about a locally scoped
 /// variable.
 #[derive(Debug, Clone)]
 pub struct LocalVariable {
     name: String,
-    scope_depth: usize,
     is_captured: bool,
     r#type: Type,
     is_mutable: bool,
@@ -25,6 +32,23 @@ pub struct LocalVariable {
 pub struct Scope {
     pub locals: Vec<LocalVariable>,
     pub types: HashMap<String, Type>,
+    pub upvalues: Vec<Upvalue>,
+}
+
+impl Scope {
+    /// Adds an upvalue to the current scope. `is_local` refers to whether the index points to
+    /// a scope-local variable or the upvalue index of the parent scope.
+    pub fn add_upvalue(&mut self, index: usize, is_local: bool) -> Option<usize> {
+        // If the upvalue already exists, simply return its index
+        for (i, u) in self.upvalues.iter().enumerate() {
+            if u.index == index && u.is_local == is_local {
+                return Some(i);
+            }
+        }
+
+        self.upvalues.push(Upvalue { index, is_local });
+        Some(self.upvalues.len() - 1)
+    }
 }
 
 #[derive(Debug, Default, Clone)]
@@ -68,6 +92,87 @@ impl Default for Context {
 impl Context {
     pub fn scope(&mut self) -> Result<&mut Scope> {
         self.scopes.last_mut().ok_or(Error::fatal())
+    }
+
+    pub fn scope_by_index(&mut self, scope_idx: usize) -> Result<&mut Scope> {
+        self.scopes.get_mut(scope_idx).ok_or(Error::fatal())
+    }
+
+    /// Ensures that a type is not a Type::Typevar, instead it resolves it to either a
+    /// generic constraint or a custom type.
+    pub fn resolve_type(&self, ty: Type) -> Type {
+        if !matches!(ty, Type::TypeVar { .. }) {
+            return ty;
+        }
+
+        match ty {
+            Type::TypeVar { name, inner } => {
+                // Start with the current scope and walk upwards.
+                for scope in self.scopes.iter().rev() {
+                    // TODO check generics first and handle inner types
+                    if scope.types.contains_key(&name) {
+                        return scope.types.get(&name).unwrap().clone();
+                    }
+                }
+                Type::Unknown
+            }
+            ty => ty,
+        }
+    }
+
+    /// For non-local variables, we recursively walk upwards from our current scope until we find it.
+    /// When it is found, it is marked as `captured`. We then add the upvalue to each scope on the way back,
+    /// giving us a linked list of sorts pointing to the original variable.
+    pub fn resolve_upvalue(
+        &mut self,
+        ident: &str,
+        scope_idx: usize,
+    ) -> Result<Option<(usize, Type)>> {
+        // If we are in the outermost scope, there are no upvalues to resolve
+        if scope_idx == 0 {
+            return Ok(None);
+        }
+
+        // Check the immediate parent scope for the variable
+        let mut parent_local = None;
+        for (local_index, variable) in self
+            .scope_by_index(scope_idx - 1)?
+            .locals
+            .iter()
+            .enumerate()
+        {
+            if variable.name == *ident {
+                dbg!(&ident, local_index);
+                parent_local = Some((local_index, variable.clone()));
+                break;
+            }
+        }
+
+        // If its found, we mark it as captured and return its index and type
+        if let Some((local_index, variable)) = parent_local {
+            self.scope_by_index(scope_idx - 1)?.locals[local_index].is_captured = true;
+
+            let ty = variable.r#type.clone();
+            return Ok(self
+                .scope_by_index(scope_idx)?
+                .add_upvalue(local_index, true)
+                .map(|idx| (idx, ty)));
+        }
+
+        // If its not found in the parent scope, we recurse up the stack of scopes
+        // until it is found (or not).
+        if let Some((idx, ty)) = self.resolve_upvalue(
+            ident,
+            scope_idx - 1
+        )? {
+            return Ok(self
+                .scope_by_index(scope_idx)?
+                .add_upvalue(idx, false)
+                .map(|idx| (idx, ty)));
+        }
+
+        Ok(None)
+
     }
 
     /// Flushes the current context.
@@ -323,56 +428,46 @@ fn call(ctx: &mut Context, expr: &Box<Ast>, args: &Vec<Ast>) -> Result<(Vec<u8>,
                 }
             }
 
-            // let mut bindings = hashbrown::HashMap::new();
+            // Type check arguments and update the `bindings` map with what our generics correspond to for this call
+            let mut bindings = HashMap::new();
+            for (idx, wanted_type) in arg_types.into_iter().enumerate() {
+                let supplied_type = args_with_types[idx].1.clone();
 
-            // // Typecheck arguments
-            // // `r#type` = wanted type, `arg_type` = supplied type
-            // for (idx, wanted_type) in arg_types.into_iter().enumerate() {
-            //     let supplied_type = args_with_types[idx].1.clone();
-
-            //     // If variable is in generics, match the supplied type against its constraints
-            //     // If its not in generics but is in Types map,
-            //     match resolve_binding(
-            //         &mut generics,
-            //         &mut bindings,
-            //         &mut program.compiler_stack,
-            //         compiler,
-            //         wanted_type.clone(),
-            //         Some(&supplied_type),
-            //     ) {
-            //         Err(e) => {
-            //             panic!(
-            //                 "wrong type in arg nr {}! wants {:?}, got {:?}",
-            //                 idx, wanted_type, supplied_type
-            //             );
-            //         }
-            //         Ok(_) => {}
-            //     }
-            // }
-
-            // match resolve_binding(
-            //     &mut generics,
-            //     &mut bindings,
-            //     &mut program.compiler_stack,
-            //     compiler,
-            //     *returns.clone(),
-            //     None,
-            // ) {
-            //     Err(e) => {
-            //         panic!("fucked up the return type bruv");
-            //     }
-            //     Ok(ty) => {
-            //         return_type = ty.clone();
-            //     }
-            // }
+                // If wanted type is a variable type, check if its supplied in the function's generics constraints.
+                // If it is, compare it against the supplied type and update the bindings table.
+                // If it isn't, resolve it to an actual type and compare it against the supplied one.
+                match wanted_type {
+                    ref wanted @ Type::TypeVar { ref name, .. } => {
+                        if let Some(constraint) = generics.get(name) {
+                            if &supplied_type == constraint {
+                                bindings.insert(wanted.clone(), supplied_type);
+                            }
+                        } else {
+                            let ty = ctx.resolve_type(wanted.clone());
+                            if ty != supplied_type {
+                                return Err(Error::fatal()); //todo
+                            }
+                        }
+                    }
+                    wanted => {
+                        if wanted != supplied_type {
+                            return Err(Error::fatal()); //todo
+                        }
+                    }
+                }
+            }
 
             bytecode.append(&mut bc);
             bytecode.push(Op::Call as u8);
             bytecode.push(u8::try_from(args.len()).unwrap());
 
-            Ok((bytecode, *returns))
+            let return_type = bindings.remove(&*(returns.clone())).unwrap_or(*returns);
+            Ok((bytecode, return_type))
         }
-        _ => panic!("attempted to call a non function???"),
+        _ => {
+            dbg!(called_type);
+            panic!("attempted to call a non function???");
+        }
     }
 }
 
@@ -393,7 +488,6 @@ fn function(
     }) = ctx.current_function_type
     // TODO this can likely be put in the Scopes
     {
-        dbg!(&surrounding_generics);
         for (k, v) in surrounding_generics.iter() {
             generics.entry(k.to_string()).or_insert(v.clone());
         }
@@ -415,7 +509,6 @@ fn function(
         scope.locals.push(LocalVariable {
             name: arg_name.clone(),
             is_mutable: false,
-            scope_depth: ctx.scopes.len() + 1,
             is_captured: false,
             r#type: arg_type.clone(),
         })
@@ -423,6 +516,18 @@ fn function(
     ctx.scopes.push(scope);
 
     let (func_bytecode, _actually_returns) = compile(ctx, body)?;
+
+    let mut upvalues_bytecode = vec![];
+    ctx.scope()?.upvalues.clone().iter().for_each(|u| {
+        dbg!(u);
+        if u.is_local {
+            upvalues_bytecode.push(1_u8);
+        } else {
+            upvalues_bytecode.push(0_u8);
+        }
+        upvalues_bytecode.push(u.index as u8); // todo allow largers size here?
+    });
+    let upvalue_count = ctx.scope()?.upvalues.len() as u8;
 
     ctx.scopes.pop();
 
@@ -452,15 +557,14 @@ fn function(
         }
     }
 
-    // TODO upvalues
     let function = Value::Function(Function {
         is_variadic: *is_variadic,
         is_method,
         arity: args.len(),
         bytecode: func_bytecode,
-        upvalue_count: 0_u8,
+        upvalue_count,
         upvalues: vec![],
-        upvalues_bytecode: vec![],
+        upvalues_bytecode: upvalues_bytecode,
     });
 
     let (function_bytecode, _) = compile(ctx, &Ast::Value(function))?;
@@ -482,8 +586,8 @@ fn if_(
     if !matches!(predicate_ty, Type::Bool) {
         panic!("predicate expression must return a boolean value");
     }
-    let (mut then_bytecode, then_ty) = compile(ctx, then_)?;
-    let (mut else_bytecode, else_ty) = compile(ctx, else_)?;
+    let (mut then_bytecode, _then_ty) = compile(ctx, then_)?;
+    let (mut else_bytecode, _else_ty) = compile(ctx, else_)?;
 
     let mut bytecode = vec![];
 
@@ -511,6 +615,7 @@ fn infix(ctx: &mut Context, a: &Box<Ast>, op: &Operator, b: &Box<Ast>) -> Result
     let (mut bytecode_b, b_type) = compile(ctx, b)?;
 
     if !a_type.allowed_infix_operators(&b_type).contains(op) {
+        dbg!(&ctx.lineage);
         panic!(
             "infix op {:?} not allowed between {:?} and {:?}",
             op, a_type, b_type
@@ -538,7 +643,7 @@ fn member(_ctx: &mut Context, _container: &Box<Ast>, _key: &Box<Ast>) -> Result<
     Ok((vec![], Type::Unknown))
 }
 
-///
+/// Pops the current call frame
 fn return_(ctx: &mut Context, expr: &Box<Ast>) -> Result<(Vec<u8>, Type)> {
     let (mut bytecode, ty) = compile(ctx, expr)?;
     bytecode.push(Op::Return as u8);
@@ -712,7 +817,6 @@ fn let_(
     ctx.assignment_ctx = Some((ident.to_owned(), ty.clone()));
     let local_variable = LocalVariable {
         name: ident.to_string(),
-        scope_depth: ctx.scopes.len(),
         is_mutable: false,
         is_captured: false,
         r#type: ty.clone(),
@@ -744,9 +848,6 @@ fn let_(
 }
 
 /// Raw values get emitted into the bytecode as <usize length><bytes>.
-/// The value gets cached within our Context object and prepended to the
-/// final payload. That way, we only need to deserialize it once and can
-/// keep on referencing its index within the stack instead.
 fn value(ctx: &mut Context, value: &Value) -> Result<(Vec<u8>, Type)> {
     let mut value_bytecode = vec![];
     let mut bytes = util::serialize_value(value.clone())?;
@@ -756,10 +857,7 @@ fn value(ctx: &mut Context, value: &Value) -> Result<(Vec<u8>, Type)> {
     value_bytecode.append(&mut bytes);
 
     let return_type = Type::from(value);
-    let idx = ctx.cache_value(value_bytecode);
-    let bc = [vec![Op::GetValue as u8], (idx as u8).to_ne_bytes().to_vec()].concat();
-
-    Ok((bc, return_type))
+    Ok((value_bytecode, return_type))
 }
 
 /// Resolves a local variable. Since scope.locals will match the runtime stack,
@@ -782,15 +880,10 @@ fn var(ctx: &mut Context, ident: &String) -> Result<(Vec<u8>, Type)> {
             return Ok((vec![Op::Get as u8, idx], return_type));
         }
         unreachable!()
-    } else
-    /* if let Some((upvalue, ty)) =
-        resolve_upvalue(&mut program.compiler_stack, compiler, ident)
-    {
-        return_type = ty;
-        bytecode.push(OpCode::GetUpvalue as u8);
-        bytecode.push(upvalue)
-    } else */
-    {
+    } else if let Some((idx, return_type)) = ctx.resolve_upvalue(ident, ctx.scopes.len() - 1)? {
+        dbg!(idx, &return_type);
+        return Ok((vec![Op::GetUpvalue as u8, idx as u8], return_type));
+    } else {
         dbg!(&ident, &ctx.scope()?.locals);
         todo!();
         // If we dont find a variable with this name, it may be an Enum type

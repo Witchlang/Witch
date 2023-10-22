@@ -79,8 +79,7 @@ impl Operator {
 }
 
 /// Ast describes the abstract syntax tree used for Witch.
-#[cfg_attr(debug_assertions, derive(Debug))]
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Ast {
     Nop,
 

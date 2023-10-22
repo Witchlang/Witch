@@ -1,0 +1,5 @@
+function calculator(op: (usize, usize) -> usize, a: usize, b: usize) -> usize {
+    return op(a, b)
+}
+
+calculator((a: usize, b: usize) -> usize: a - b, ((a: usize, b: usize) -> usize: a + b)(6, 4), 5)

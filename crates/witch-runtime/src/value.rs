@@ -1,10 +1,9 @@
 use alloc::{string::String, vec, vec::Vec};
 use serde::{Deserialize, Serialize};
 
-use crate::{stack::Pointer, vm::Op};
+use crate::{vm::Op, stack::Pointer};
 
-#[cfg_attr(debug_assertions, derive(Debug))]
-#[derive(Serialize, Deserialize, PartialEq, Clone)]
+#[derive(Serialize, Debug, Deserialize, PartialEq, Clone)]
 #[repr(C, u8)]
 pub enum Value {
     Void,
@@ -30,14 +29,12 @@ pub enum Value {
     F64(f64),
 }
 
-#[cfg_attr(debug_assertions, derive(Debug))]
-#[derive(Serialize, Deserialize, PartialEq, Clone)]
+#[derive(Serialize, Debug, Deserialize, PartialEq, Clone)]
 pub enum Error {
     InvalidOp(Op),
 }
 
-#[cfg_attr(debug_assertions, derive(Debug))]
-#[derive(Serialize, Deserialize, PartialEq, Clone)]
+#[derive(Serialize, Debug, Deserialize, PartialEq, Clone)]
 pub struct Function {
     pub is_variadic: bool,
     pub is_method: bool,

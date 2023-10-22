@@ -1,10 +1,9 @@
-let x = 1 + 2 * 5 - 5
-let y = x + 1 - 2;
+ho = "ho "
 
-let ho = "string"
-
-function id<T>(self: T) -> T {
-   return self + 2
+function id [T](n: T) -> T {
+   return n
 }
 
-id(y) * 2
+multiplier = id(5) * 2 + id(4) - 11
+
+ho * multiplier

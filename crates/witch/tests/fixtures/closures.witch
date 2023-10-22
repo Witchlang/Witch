@@ -1,0 +1,23 @@
+
+/*function a (x: usize) -> (usize) -> (usize) -> usize {
+
+    return (y: usize) -> (usize) -> usize {
+
+        return (z:usize ) -> x * y * z
+    }
+
+}
+
+a(1)(2)(66)*/
+
+z = 5
+a = 10
+
+function b (x: usize) -> (usize) -> usize {
+    return (y: usize) -> usize {
+        return x
+    }
+    
+}
+
+b(14)(7)

@@ -5,6 +5,10 @@ edition = "2018"
 
 [lib]
 
+[[bin]]
+name = "witch"
+path = "src/bin.rs"
+
 [features]
 default = ["compiler"]
 compiler = ["dep:witch_compiler"]

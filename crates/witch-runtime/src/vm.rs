@@ -6,6 +6,18 @@ use crate::heap::Heap;
 use crate::stack::{Entry, Pointer, Stack};
 use crate::value::{Function, Value};
 
+#[derive(Debug)]
+enum Upvalue {
+    /// If its closed over, it contains a pointer to the value on the heap
+    Closed(Pointer),
+
+    /// If its not yet closed over, it contains the stack index of where the value resides
+    Open(usize),
+
+    /// Points to a different upvalue
+    Link(usize)
+}
+
 #[repr(u8)]
 #[cfg_attr(debug_assertions, derive(Debug))]
 #[derive(Eq, PartialEq, Clone)]
@@ -31,13 +43,22 @@ impl core::convert::From<u8> for InfixOp {
             0 => InfixOp::Add,
             1 => InfixOp::Sub,
             2 => InfixOp::Mul,
+            3 => InfixOp::Div,
+            4 => InfixOp::Mod,
+            5 => InfixOp::Eq,
+            6 => InfixOp::NotEq,
+            7 => InfixOp::Lt,
+            8 => InfixOp::Lte,
+            9 => InfixOp::Gt,
+            10 => InfixOp::Gte,
+            11 => InfixOp::And,
+            12 => InfixOp::Or,
             _ => todo!(),
         }
     }
 }
 
-#[cfg_attr(debug_assertions, derive(Debug))]
-#[derive(Serialize, Deserialize, PartialEq, Clone)]
+#[derive(Serialize, Debug, Deserialize, PartialEq, Clone)]
 #[repr(u8)]
 pub enum Op {
     SetupValueCache,
@@ -47,6 +68,7 @@ pub enum Op {
 
     Push,
     Get,
+    GetUpvalue,
     Set,
 
     Jump,
@@ -69,20 +91,21 @@ impl core::convert::From<u8> for Op {
 
             4 => Op::Push,
             5 => Op::Get,
-            6 => Op::Set,
+            6 => Op::GetUpvalue,
+            7 => Op::Set,
 
-            7 => Op::Jump,
-            8 => Op::JumpIfFalse,
+            8 => Op::Jump,
+            9 => Op::JumpIfFalse,
 
-            9 => Op::Binary,
-            10 => Op::Return,
-            11 => Op::Call,
+            10 => Op::Binary,
+            11 => Op::Return,
+            12 => Op::Call,
             _ => Op::Crash,
         }
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct CallFrame {
     pub ptr: Pointer,
     pub ip: usize,
@@ -94,6 +117,9 @@ pub struct Vm {
     heap: Heap,
     frames: Vec<CallFrame>,
     functions: Vec<Function>,
+
+    /// A vec of pointers to the Heap, where we store our upvalues for closures
+    upvalues: Vec<Upvalue>,
     cache: Vec<Entry>,
 }
 
@@ -110,6 +136,7 @@ impl Vm {
             heap: Heap::default(),
             frames: vec![],
             functions: vec![],
+            upvalues: vec![],
             cache: vec![],
         }
     }
@@ -148,7 +175,7 @@ impl Vm {
 
     fn deref(&self, ptr: Pointer) -> &Value {
         match ptr {
-            Pointer::Heap(idx) => self.heap.get(idx),
+            Pointer(idx) => self.heap.get(idx),
             _ => todo!(),
         }
     }
@@ -158,6 +185,45 @@ impl Vm {
             return f;
         }
         unreachable!()
+    }
+
+    /// Moves a stack entry to the heap and stashes a copy of the pointer
+    /// among our `upvalues` to be referenced by a closure at a later time
+    /// TODO Make it less naive so we dont capture upvalues more than once if necessary
+    fn capture_upvalue(&mut self, idx: usize) -> usize {
+        self.upvalues.push(Upvalue::Open(idx));
+        dbg!(idx);
+        return self.upvalues.len() - 1;
+    }
+
+    fn link_upvalue(&mut self, idx: usize) -> usize {
+        self.upvalues.push(Upvalue::Link(idx));
+        return self.upvalues.len() - 1;
+    }
+
+    /// Moves a stack entry to the heap and stashes a copy of the pointer
+    /// among our `upvalues` to be referenced by a closure at a later time
+    fn close_upvalues(&mut self, frame: CallFrame) {
+        
+        for mut idx in 0..self.upvalues.len() { 
+            while let Upvalue::Link(i) = self.upvalues[idx] {
+                idx = i;
+            }
+           
+            if let Upvalue::Open(stack_index) = self.upvalues[idx] {
+                if stack_index >= frame.stack_start {
+                    let entry = self.stack.get(stack_index);
+                    if let Entry::Pointer(ptr) = entry {
+                        self.upvalues[idx] = Upvalue::Closed(ptr);
+                    } else {
+                        let ptr = self.heap.insert(entry.into());
+                        self.upvalues[idx] = Upvalue::Closed(ptr);
+                    }
+                }
+                
+            }
+
+    }
     }
 
     pub fn push_callframe(&mut self, ptr: Pointer, offset: usize) {
@@ -255,8 +321,6 @@ impl Vm {
             let mut offset = 0;
             let forward = true;
 
-            dbg!(&op);
-
             #[cfg(feature = "profile")]
             let opcode_timer_start = std::time::Instant::now();
 
@@ -300,25 +364,6 @@ impl Vm {
                     offset = 1;
                 }
 
-                // Conducts a binary operation between the two top entries on the stack.
-                // The right-hand side is popped off the stack, while the left-hand side is edited
-                // in place with the result.
-                Op::Binary => {
-                    let bin_op = InfixOp::from(self.next_byte());
-                    let b = self.stack.pop().unwrap();
-                    let a = self.stack.last_mut().unwrap();
-                    *a = match (*a, bin_op, b) {
-                        (Entry::Usize(a), InfixOp::Add, Entry::Usize(b)) => Entry::Usize(a + b),
-                        (Entry::Usize(a), InfixOp::Sub, Entry::Usize(b)) => Entry::Usize(a - b),
-                        (Entry::Usize(a), InfixOp::Mul, Entry::Usize(b)) => Entry::Usize(a * b),
-                        (Entry::Usize(a), InfixOp::Div, Entry::Usize(b)) => Entry::Usize(a / b),
-
-                        (x, op, y) => {
-                            todo!("binary op {:?} {:?} {:?}", x, op, y)
-                        }
-                    };
-                    offset = 1;
-                }
                 Op::Push => {
                     let value_length_bytes: [u8; 8] = self.next_eight_bytes();
                     let value_length = usize::from_ne_bytes(value_length_bytes);
@@ -326,7 +371,7 @@ impl Vm {
                     let value_bytes = &self.deref_function(self.frame().ptr).bytecode
                         [(ip + 9)..(ip + 9 + value_length)];
 
-                    let (value, _): (Value, usize) =
+                    let (mut value, _): (Value, usize) =
                         bincode::serde::decode_from_slice(value_bytes, bincode::config::legacy())
                             .unwrap();
 
@@ -335,33 +380,42 @@ impl Vm {
                         Value::Bool(b) => Entry::Bool(b),
                         // Todo all primitive types that get to be stack entries
                         _ => {
-                            // if let Value::Function(mut f) = value {
-                            //     for (i, x) in f
-                            //         .upvalues_bytecode
-                            //         .as_slice()
-                            //         .to_owned()
-                            //         .chunks(2)
-                            //         .enumerate()
-                            //     {
-                            //         let is_local = x[0];
-                            //         let stack_idx = x[1];
-                            //         if is_local == 1 {
-                            //             f.upvalues.insert(
-                            //                 i,
-                            //                 self.capture_upvalue(
-                            //                     self.frame().stack_start + stack_idx as usize,
-                            //                 ),
-                            //             )
-                            //         } else {
-                            //             f.upvalues.insert(
-                            //                 i,
-                            //                 self.functions[self.frame().function].upvalues
-                            //                     [stack_idx as usize],
-                            //             )
-                            //         }
-                            //     }
-                            //     value = Value::Function(f);
-                            // }
+
+                            // For functions, we need to resolve upvalues before putting it on the heap
+                            if let Value::Function(mut f) = value {
+                                for (i, x) in f
+                                    .upvalues_bytecode
+                                    .as_slice()
+                                    .to_owned()
+                                    .chunks(2)
+                                    .enumerate()
+                                {
+                                    let is_local = x[0];
+                                    let idx = x[1];
+
+                                    // If `is_local` is 1, the upvalue refers to an entry
+                                    // in our local callframe's stack. We need to capture it to make sure
+                                    // it keeps on living after we pop this frame.
+                                    if is_local == 1 {
+                                        dbg!(&self.stack.get(self.frame().stack_start + idx as usize));
+                                        f.upvalues.insert(
+                                            i,
+                                            self.capture_upvalue(
+                                                self.frame().stack_start + idx as usize,
+                                            ),
+                                        )
+                                    // If it's not local, that means it refers to an upvalue among
+                                    // this callframe's upvalues, which in turn refers to something else.
+                                    } else {
+                                        f.upvalues.insert(
+                                            i,
+                                            self.link_upvalue(self.deref_function(self.frame().ptr).upvalues
+                                                [idx as usize]),
+                                        )
+                                    }
+                                }
+                                value = Value::Function(f);
+                            }
                             Entry::Pointer(self.heap.insert(value))
                         }
                     };
@@ -374,6 +428,30 @@ impl Vm {
                 Op::Get => {
                     let b = self.next_byte();
                     let entry = self.stack.get(self.frame().stack_start + b as usize);
+                    self.stack.push(entry);
+
+                    offset = 1;
+                }
+
+                Op::GetUpvalue => {
+
+                    let slot = self.next_byte();
+                    let idx = self.deref_function(self.frame().ptr).upvalues[slot as usize];
+
+                    let mut upv = &self.upvalues[idx];
+
+                    while let Upvalue::Link(idx) = upv {
+                        upv = &self.upvalues[*idx];
+                    }
+
+                    dbg!(&upv);
+                    dbg!(&self.stack);
+
+                    let entry = match upv {
+                        Upvalue::Closed(ptr) => Entry::Pointer(*ptr),
+                        Upvalue::Open(idx) => self.stack.get(*idx),
+                        _ => unreachable!()
+                    };
                     self.stack.push(entry);
 
                     offset = 1;
@@ -403,10 +481,49 @@ impl Vm {
                     offset = 1;
                 }
 
+                Op::Jump => {}
+
+                Op::JumpIfFalse => {
+                    let mut jmp_offset = 0;
+                    let cond = self.stack.pop().unwrap();
+                    if let Entry::Bool(false) = cond {
+                        jmp_offset = u64::from_ne_bytes(self.next_eight_bytes()) as usize;
+                    }
+                    offset = 8 + jmp_offset;
+                }
+
+                // Conducts a binary operation between the two top entries on the stack.
+                // The right-hand side is popped off the stack, while the left-hand side is edited
+                // in place with the result.
+                Op::Binary => {
+                    let bin_op = InfixOp::from(self.next_byte());
+                    let b = self.stack.pop().unwrap();
+                    let a = self.stack.last_mut().unwrap();
+                    
+                    *a = match (*a, bin_op, b) {
+                        (Entry::Usize(a), InfixOp::Add, Entry::Usize(b)) => Entry::Usize(a + b),
+                        (Entry::Usize(a), InfixOp::Sub, Entry::Usize(b)) => Entry::Usize(a - b),
+                        (Entry::Usize(a), InfixOp::Mul, Entry::Usize(b)) => Entry::Usize(a * b),
+                        (Entry::Usize(a), InfixOp::Div, Entry::Usize(b)) => Entry::Usize(a / b),
+
+                        (Entry::Usize(a), InfixOp::Lt, Entry::Usize(b)) => Entry::Bool(a < b),
+
+                        (x, op, y) => {
+                            dbg!(&x, &op, &y);
+                            unreachable!()
+                          //  todo!("binary op {:?} {:?} {:?}", x, op, y)
+                        }
+                    };
+                    offset = 1;
+                }
+
                 // Pops the current callframe, truncates the stack to its original size
                 // and puts the return value on top of it.
                 Op::Return => {
                     let frame = self.frames.pop().unwrap();
+
+                    self.close_upvalues(frame);
+
                     let result = self.stack.pop().unwrap();
                     self.stack.truncate(frame.stack_start);
                     self.stack.push(result);
@@ -423,6 +540,7 @@ impl Vm {
                         self.push_callframe(ptr, 2);
                         continue;
                     } else {
+                        dbg!(&self.stack);
                         unreachable!()
                     }
 

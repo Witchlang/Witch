@@ -1,4 +1,4 @@
-function fib(n: usize) -> usize {
+function fib (n: usize) -> usize {
     if n < 2 {
         return n
     } else {
@@ -6,4 +6,5 @@ function fib(n: usize) -> usize {
     }
 }
 
-fib(20)
+fib(10)
+

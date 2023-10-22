@@ -240,18 +240,23 @@ fn list_types<'input>(
     p: &mut Parser<'input, Lexer<'input>>,
     mut types: Vec<Type>,
 ) -> Result<Vec<Type>> {
-    let types = match p.peek() {
-        Some(Kind::Comma) => {
-            p.consume(&Kind::Comma)?;
-            list_types(p, types)?
-        }
-        Some(Kind::Ident | Kind::LParen) => {
-            types.push(type_literal(p)?);
-            types
-        }
-        _ => types,
-    };
+    if let Some(Kind::Ident | Kind::LSquare | Kind::LParen) = p.peek() {
+        types.push(type_literal(p)?);
+    }
+
+    if p.at(Kind::Comma) {
+        p.consume(&Kind::Comma)?;
+        return list_types(p, types);
+    }
+
     Ok(types)
+}
+
+#[test]
+fn it_lists_types() {
+    let mut p = Parser::new("usize, (usize, usize) -> usize, usize");
+    let result = list_types(&mut p, vec![]).unwrap();
+    assert_eq!(result.len(), 3);
 }
 
 /// A single type literal.
@@ -280,12 +285,7 @@ pub fn type_literal<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<Typ
 
             Type::from_str(ident, inner)
         }
-        Some(Kind::LSquare) => {
-            p.consume(&Kind::LSquare)?;
-            p.consume(&Kind::RSquare)?;
-            Type::List(Box::new(type_literal(p)?))
-        }
-        Some(Kind::LParen | Kind::LAngle) => function_signature(p)?,
+        Some(Kind::LParen | Kind::LSquare) => function_signature(p)?,
         kind => {
             return Err(Error::new(
                 &format!("Unknown type error. Expected type literal, got: {:?}", kind),
@@ -314,14 +314,14 @@ pub fn type_literal<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<Typ
 /// A function signature.
 /// ## Example
 /// ```no
-/// <I>(string, I, i32...) where I: Iterator -> void
+/// [I](string, I, i32...) where I: Iterator -> void
 /// () -> String
 /// ```
 fn function_signature<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<Type> {
-    let type_vars = if let Some(Kind::LAngle) = p.peek() {
-        p.consume(&Kind::LAngle)?;
+    let type_vars = if let Some(Kind::LSquare) = p.peek() {
+        p.consume(&Kind::LSquare)?;
         let vars = p.repeating(vec![], Kind::Ident, Some(Kind::Comma))?;
-        p.consume(&Kind::RAngle)?;
+        p.consume(&Kind::RSquare)?;
         vars.iter()
             .map(|t| p.text(t).to_string())
             .collect::<Vec<String>>()

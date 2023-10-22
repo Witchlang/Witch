@@ -3,18 +3,9 @@ use alloc::vec::Vec;
 
 use crate::value::Value;
 
-/// Pointer is a usize referring to a Value or an Entry located somewhere else
+/// Pointer is a usize referring to a Value on the heap
 #[derive(Copy, Clone, Debug, PartialEq)]
-pub enum Pointer {
-    /// Refers to an entry within the stack
-    Stack(usize),
-
-    /// Refers to a value handle within our GC'd heap
-    Heap(usize),
-
-    /// Refers to a stack entry within the value cache
-    Cache(usize),
-}
+pub struct Pointer(pub usize);
 
 #[derive(Copy, Clone, Debug)]
 pub enum Entry {

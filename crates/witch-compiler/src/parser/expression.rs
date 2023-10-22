@@ -38,27 +38,31 @@ pub fn expression_inner<'input>(
                 _ => unreachable!(),
             }
         }
+        Some(Kind::KwNew) => {
+            // A struct expression
+            // new Foo {}
+            let _ = p.consume(&Kind::KwNew)?;
+            let token = p.consume(&Kind::Ident)?;
+            let ident = p.text(&token).to_string();
+            p.consume(&Kind::LBrace)?;
+            let fields = map_values(p, HashMap::default())?;
+            p.consume(&Kind::RBrace)?;
+
+            Ast::Struct {
+                ident: Some(ident),
+                fields,
+                span: start..p.cursor,
+            }
+        }
         Some(Kind::Ident) => {
             // An expression starting with an identifier can be
             // - A variable: my_var
-            // - A struct: Foo { }
+            // - TODO: A single-param closure: x -> x + 1
+            // - TODO: An enum expression: Option.Some("")
             let token = p.consume(&Kind::Ident)?;
             let ident = p.text(&token).to_string();
 
-            if p.at(Kind::LBrace) {
-                // Struct expression
-                p.consume(&Kind::LBrace)?;
-                let fields = map_values(p, HashMap::default())?;
-                p.consume(&Kind::RBrace)?;
-
-                Ast::Struct {
-                    ident: Some(ident),
-                    fields,
-                    span: start..p.cursor,
-                }
-            } else {
-                Ast::Var(ident)
-            }
+            Ast::Var(ident)
         }
         Some(Kind::LParen) => {
             // An expression starting with a left paren can be
@@ -67,15 +71,10 @@ pub fn expression_inner<'input>(
             either(p, vec![function_expression, nested_expression])?
         }
         Some(Kind::LSquare) => {
-            // A list literal
-            p.consume(&Kind::LSquare)?;
-            let items = list_expressions(p, vec![])?;
-            p.consume(&Kind::RSquare)?;
-
-            Ast::List {
-                items,
-                span: start..p.cursor,
-            }
+            // Starting with square bracket can be
+            // - A list literal: [1, 2, 3]
+            // - A generic function expression: [T, U](a: T) -> U {}
+            either(p, vec![function_expression, list_literal])?
         }
         x => panic!("invalid expression start: {:?} at {}", x, p.cursor),
     };
@@ -227,6 +226,18 @@ fn nested_expression<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<As
     Ok(expr)
 }
 
+fn list_literal<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<Ast> {
+    let start = p.cursor;
+    p.consume(&Kind::LSquare)?;
+    let items = list_expressions(p, vec![])?;
+    p.consume(&Kind::RSquare)?;
+
+    Ok(Ast::List {
+        items,
+        span: start..p.cursor,
+    })
+}
+
 fn function_call<'input>(p: &mut Parser<'input, Lexer<'input>>, expr: Box<Ast>) -> Result<Ast> {
     let mut args = vec![];
     let start = p.cursor;
@@ -248,11 +259,11 @@ fn function_call<'input>(p: &mut Parser<'input, Lexer<'input>>, expr: Box<Ast>) 
 
 pub fn function_expression<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<Ast> {
     // Possibly type variables
-    // <T, U>
-    let type_vars = if let Some(Kind::LAngle) = p.peek() {
-        p.consume(&Kind::LAngle)?;
+    // [T, U]
+    let type_vars = if let Some(Kind::LSquare) = p.peek() {
+        p.consume(&Kind::LSquare)?;
         let vars = p.repeating(vec![], Kind::Ident, Some(Kind::Comma))?;
-        p.consume(&Kind::RAngle)?;
+        p.consume(&Kind::RSquare)?;
         vars.iter()
             .map(|t| p.text(t).to_string())
             .collect::<Vec<String>>()
@@ -281,16 +292,44 @@ pub fn function_expression<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Res
 
     p.consume(&Kind::Arrow)?;
 
-    let (returns, body) = {
-        let mut fork = p.fork();
-        if let (Ok(ty), true) = (type_literal(&mut fork), fork.at(Kind::LBrace)) {
+    // After the arrow, a function declaration can take a couple of forms:
+    // -> type: expr       <-- lambda with return type
+    // -> type { stmt }    <-- full function with return type
+    // -> expr             <-- lambda with inferred return type
+    let mut fork = p.fork();
+    let maybe_type_literal = type_literal(&mut fork);
+
+    let (returns, body) = match maybe_type_literal {
+        Ok(ty) if fork.at(Kind::LBrace) => {
             *p = fork;
             p.consume(&Kind::LBrace)?;
             let body = statement(p)?;
             p.consume(&Kind::RBrace)?;
             (ty, body)
-        } else {
-            (Type::Unknown, expression(p)?)
+        }
+        Ok(ty) if fork.at(Kind::Colon) => {
+            *p = fork;
+            p.consume(&Kind::Colon)?;
+            let start = p.cursor;
+            let expr = Box::new(expression(p)?);
+            (
+                ty,
+                Ast::Return {
+                    expr,
+                    span: start..p.cursor,
+                },
+            )
+        }
+        _ => {
+            let start = p.cursor;
+            let expr = Box::new(expression(p)?);
+            (
+                Type::Unknown,
+                Ast::Return {
+                    expr,
+                    span: start..p.cursor,
+                },
+            )
         }
     };
 
