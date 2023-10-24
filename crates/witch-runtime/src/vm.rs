@@ -116,6 +116,8 @@ pub struct Vm {
     stack: Stack,
     heap: Heap,
     frames: Vec<CallFrame>,
+
+    /// Our function vtable. Struct methods go here. 
     functions: Vec<Function>,
 
     /// A vec of pointers to the Heap, where we store our upvalues for closures
@@ -205,10 +207,7 @@ impl Vm {
     /// among our `upvalues` to be referenced by a closure at a later time
     fn close_upvalues(&mut self, frame: CallFrame) {
         
-        for mut idx in 0..self.upvalues.len() { 
-            while let Upvalue::Link(i) = self.upvalues[idx] {
-                idx = i;
-            }
+        for idx in (0..self.upvalues.len()).rev() { 
            
             if let Upvalue::Open(stack_index) = self.upvalues[idx] {
                 if stack_index >= frame.stack_start {
@@ -219,6 +218,10 @@ impl Vm {
                         let ptr = self.heap.insert(entry.into());
                         self.upvalues[idx] = Upvalue::Closed(ptr);
                     }
+                } else {
+                    // If we reach open upvalues poiting to stack entries below our stack_start,
+                    // we can bail out early
+                    break;
                 }
                 
             }
@@ -248,7 +251,7 @@ impl Vm {
             return Ok(Value::Void);
         }
 
-        let ptr = self.heap.insert(Value::Function(crate::value::Function {
+        let ptr = self.heap.insert(Value::Function(Function {
             is_variadic: false,
             is_method: false,
             arity: 0,
@@ -397,7 +400,6 @@ impl Vm {
                                     // in our local callframe's stack. We need to capture it to make sure
                                     // it keeps on living after we pop this frame.
                                     if is_local == 1 {
-                                        dbg!(&self.stack.get(self.frame().stack_start + idx as usize));
                                         f.upvalues.insert(
                                             i,
                                             self.capture_upvalue(
@@ -444,9 +446,7 @@ impl Vm {
                         upv = &self.upvalues[*idx];
                     }
 
-                    dbg!(&upv);
-                    dbg!(&self.stack);
-
+                
                     let entry = match upv {
                         Upvalue::Closed(ptr) => Entry::Pointer(*ptr),
                         Upvalue::Open(idx) => self.stack.get(*idx),
@@ -497,10 +497,21 @@ impl Vm {
                 // in place with the result.
                 Op::Binary => {
                     let bin_op = InfixOp::from(self.next_byte());
-                    let b = self.stack.pop().unwrap();
-                    let a = self.stack.last_mut().unwrap();
+                    let mut b = self.stack.pop().unwrap();
+                    let mut a = self.stack.pop().unwrap();
+
+
+                    if let Entry::Pointer(ptr) = a {
+                        let v: Value = (*(&self.deref(ptr))).clone().into();
+                        a = v.into();
+                    }
+
+                    if let Entry::Pointer(ptr) = b {
+                        let v: Value = (*(&self.deref(ptr))).clone().into();
+                        b = v.into();
+                    }
                     
-                    *a = match (*a, bin_op, b) {
+                    let r = match (a, bin_op, b) {
                         (Entry::Usize(a), InfixOp::Add, Entry::Usize(b)) => Entry::Usize(a + b),
                         (Entry::Usize(a), InfixOp::Sub, Entry::Usize(b)) => Entry::Usize(a - b),
                         (Entry::Usize(a), InfixOp::Mul, Entry::Usize(b)) => Entry::Usize(a * b),
@@ -509,13 +520,15 @@ impl Vm {
                         (Entry::Usize(a), InfixOp::Lt, Entry::Usize(b)) => Entry::Bool(a < b),
 
                         (x, op, y) => {
-                            dbg!(&x, &op, &y);
+                          //  dbg!(&x, &op, &y);
                             unreachable!()
                           //  todo!("binary op {:?} {:?} {:?}", x, op, y)
                         }
                     };
+                    self.stack.push(r);
                     offset = 1;
                 }
+                
 
                 // Pops the current callframe, truncates the stack to its original size
                 // and puts the return value on top of it.
@@ -550,7 +563,7 @@ impl Vm {
                 }
 
                 x => {
-                    return Err(Value::Error(crate::value::Error::InvalidOp(x)));
+                    return Err(Value::Error(crate::value::Error::InvalidOp(x as u8)));
                 }
             };
 

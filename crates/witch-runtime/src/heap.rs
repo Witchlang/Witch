@@ -1,6 +1,6 @@
 use slab::Slab;
 
-use crate::{value::Value, stack::Pointer};
+use crate::{stack::Pointer, value::Value};
 
 #[derive(Default)]
 pub struct Heap {
@@ -16,6 +16,8 @@ impl Heap {
         self.mem.get(key).unwrap()
     }
 }
+
+
 
 // #[derive(Debug)]
 // pub struct Handle {

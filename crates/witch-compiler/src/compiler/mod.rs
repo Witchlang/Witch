@@ -5,10 +5,10 @@ use std::collections::HashMap;
 use std::ops::Range;
 
 use crate::error::{Error, Result};
-use crate::parser::ast::{Ast, Operator};
-use crate::types::{Type, TypeDecl};
-use witch_runtime::value::Function;
-use witch_runtime::{value::Value, vm::Op};
+use witch_parser::ast::{Ast, Operator};
+use witch_parser::types::{Type, TypeDecl};
+use witch_runtime::value::{Function, Value};
+use witch_runtime::vm::Op;
 
 #[derive(Debug, Clone)]
 pub struct Upvalue {
@@ -53,8 +53,8 @@ impl Scope {
 
 #[derive(Debug, Default, Clone)]
 pub struct Cached {
-    bytecode: Vec<u8>,
-    flushed: bool,
+    pub bytecode: Vec<u8>,
+    pub flushed: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -72,6 +72,7 @@ pub struct Context {
     pub assignment_ctx: Option<(String, Type)>,
 
     /// Values get cached in order keep the subsequent programs smaller
+    pub prelude: Option<Vec<u8>>,
     pub functions_cache: Vec<Cached>,
     pub value_cache: Vec<Cached>,
 }
@@ -83,6 +84,7 @@ impl Default for Context {
             lineage: Default::default(),
             current_function_type: None,
             assignment_ctx: None,
+            prelude: None,
             functions_cache: Default::default(),
             value_cache: Default::default(),
         }
@@ -106,9 +108,10 @@ impl Context {
         }
 
         match ty {
-            Type::TypeVar { name, inner } => {
+            Type::TypeVar { name, .. } => {
                 // Start with the current scope and walk upwards.
                 for scope in self.scopes.iter().rev() {
+                    dbg!(&name, &scope);
                     // TODO check generics first and handle inner types
                     if scope.types.contains_key(&name) {
                         return scope.types.get(&name).unwrap().clone();
@@ -142,7 +145,6 @@ impl Context {
             .enumerate()
         {
             if variable.name == *ident {
-                dbg!(&ident, local_index);
                 parent_local = Some((local_index, variable.clone()));
                 break;
             }
@@ -161,10 +163,7 @@ impl Context {
 
         // If its not found in the parent scope, we recurse up the stack of scopes
         // until it is found (or not).
-        if let Some((idx, ty)) = self.resolve_upvalue(
-            ident,
-            scope_idx - 1
-        )? {
+        if let Some((idx, ty)) = self.resolve_upvalue(ident, scope_idx - 1)? {
             return Ok(self
                 .scope_by_index(scope_idx)?
                 .add_upvalue(idx, false)
@@ -172,14 +171,14 @@ impl Context {
         }
 
         Ok(None)
-
     }
 
     /// Flushes the current context.
     /// Unflushed cached values get returned as a `prelude` bytecode and marked as such.
     /// Scopes and AST lineage of the context get reset.
     pub fn flush(&mut self) -> Vec<u8> {
-        let mut bc = vec![];
+        let mut bc = self.prelude.take().unwrap_or(vec![]);
+
         let mut len: usize = 0;
         for cached in self.value_cache.iter_mut() {
             if !cached.flushed {
@@ -240,7 +239,7 @@ impl Context {
                 bytecode: fn_bytecode,
                 flushed: false,
             });
-            self.functions_cache.len()
+            self.functions_cache.len() - 1
         }
     }
 }
@@ -279,6 +278,11 @@ pub fn compile<'a>(ctx: &mut Context, ast: &Ast) -> Result<(Vec<u8>, Type)> {
         } => let_(ctx, ident, annotated_type, expr, span)?,
         Ast::Return { expr, span: _ } => return_(ctx, expr)?,
         Ast::Statement { stmt, rest, span } => statement(ctx, stmt.clone(), rest.clone(), span)?,
+        Ast::Struct {
+            ident,
+            fields,
+            span,
+        } => struct_literal(ctx, ident, fields, span)?,
         Ast::Type { name, decl, span } => decl_type(ctx, name, decl, span)?,
         Ast::Value(v) => value(ctx, v)?,
         Ast::Var(ident) => var(ctx, ident)?,
@@ -519,7 +523,6 @@ fn function(
 
     let mut upvalues_bytecode = vec![];
     ctx.scope()?.upvalues.clone().iter().for_each(|u| {
-        dbg!(u);
         if u.is_local {
             upvalues_bytecode.push(1_u8);
         } else {
@@ -673,7 +676,43 @@ fn statement(
     Ok((bytecode, ty))
 }
 
-/// Declares a new type for the current scope. Does not emit any bytecode.
+fn struct_literal(
+    ctx: &mut Context,
+    ident: &Option<String>,
+    fields: &HashMap<String, Ast>,
+    _span: &Range<usize>,
+) -> Result<(Vec<u8>, Type)> {
+    let mut return_type = Type::Unknown;
+    let mut field_types = None;
+
+    // if named, look up the type and get vtable entries for the methods
+    if let Some(name) = ident {
+        // This is a named struct. make sure the type is defined
+        if let ref struct_type @ Type::Struct { ref fields, .. } = ctx
+            .resolve_type(Type::TypeVar {
+                name: name.to_string(),
+                inner: vec![],
+            })
+            .clone()
+        {
+            return_type = struct_type.clone();
+            field_types = Some(fields);
+        } else {
+            panic!(
+                "struct of name {} is not defined at this point or is of the wrong type",
+                name
+            );
+        }
+    }
+    // put fields on the stack
+    // put method pointers on the stack
+    // emit collect list bytecode
+
+    Ok((vec![], Type::Unknown))
+}
+
+/// Declares a new type for the current scope. The type itself does not emit any bytecode,
+/// but struct methods get inserted into our function vtable, which get emitted post compilation.
 fn decl_type(
     ctx: &mut Context,
     name: &str,
@@ -685,6 +724,26 @@ fn decl_type(
             variants,
             generics: _,
         } => Type::Enum(variants.clone()),
+
+        TypeDecl::Struct {
+            generics,
+            fields,
+            methods,
+        } => {
+            let mut methods_lookup = HashMap::default();
+            for (name, ast) in methods.iter() {
+                let (fn_bytecode, ty) = compile(ctx, ast)?;
+                let idx = ctx.cache_fn(fn_bytecode);
+                methods_lookup.insert(name.to_owned(), (ty, idx));
+            }
+
+            Type::Struct {
+                name: Some(name.to_string()),
+                fields: fields.clone(),
+                methods: methods_lookup,
+                generics: generics.clone(),
+            }
+        }
         // TypeDecl::Interface { properties } => Type::Interface {
         //     name: name.to_string(),
         //     properties: properties
@@ -881,7 +940,6 @@ fn var(ctx: &mut Context, ident: &String) -> Result<(Vec<u8>, Type)> {
         }
         unreachable!()
     } else if let Some((idx, return_type)) = ctx.resolve_upvalue(ident, ctx.scopes.len() - 1)? {
-        dbg!(idx, &return_type);
         return Ok((vec![Op::GetUpvalue as u8, idx as u8], return_type));
     } else {
         dbg!(&ident, &ctx.scope()?.locals);

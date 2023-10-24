@@ -5,5 +5,5 @@ extern crate alloc;
 
 mod heap;
 mod stack;
-pub mod value;
 pub mod vm;
+pub mod value;

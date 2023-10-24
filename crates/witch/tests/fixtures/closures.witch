@@ -1,23 +1,11 @@
 
-/*function a (x: usize) -> (usize) -> (usize) -> usize {
-
-    return (y: usize) -> (usize) -> usize {
-
-        return (z:usize ) -> x * y * z
-    }
-
-}
-
-a(1)(2)(66)*/
-
-z = 5
-a = 10
+let z = 10
 
 function b (x: usize) -> (usize) -> usize {
     return (y: usize) -> usize {
-        return x
+        return x + y + z
     }
     
 }
 
-b(14)(7)
+b(14)(6)

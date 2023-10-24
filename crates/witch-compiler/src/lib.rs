@@ -10,6 +10,7 @@
 
 use anyhow::Context as AContext;
 use anyhow::Result;
+use compiler::Cached;
 use compiler::Context;
 
 use std::{
@@ -17,21 +18,27 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use witch_parser::Parser;
+
 mod compiler;
 mod error;
-mod parser;
-mod types;
 
 /// Takes a Witch source file and compiles it to bytecode, or returns `error::Error`.
 pub fn compile(file_path: PathBuf, maybe_ctx: Option<Context>) -> Result<(Vec<u8>, Context)> {
     let (_root_path, source) = resolve_file(None, file_path)?;
-    let mut parser = parser::Parser::new(&source);
+    let mut parser = Parser::new(&source);
     let ast = parser.file().unwrap();
 
-    let mut ctx = maybe_ctx.unwrap_or_default();
+    // If no context is provided, create a new one and compile the prelude for it
+    let mut ctx = maybe_ctx.unwrap_or_else(|| {
+        let mut ctx = Context::default();
+        let (prelude, _) = compiler::compile(&mut ctx, &witch_std::prelude()).unwrap();
+        ctx.prelude = Some(prelude);
+        ctx
+    });
+
     let (bc, _) = compiler::compile(&mut ctx, &ast).unwrap();
-    let prelude = ctx.flush();
-    Ok(([prelude, bc].concat(), ctx))
+    Ok(([ctx.flush(), bc].concat(), ctx))
 }
 
 /// Canonicalizes a file path from our `start_path`, returning the new path as well as the file contents.

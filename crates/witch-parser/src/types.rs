@@ -3,7 +3,7 @@ use core::mem::discriminant;
 use std::collections::HashMap;
 use witch_runtime::value::Value;
 
-use crate::parser::ast::{Ast, Operator};
+use crate::ast::{Ast, Operator};
 
 #[derive(PartialEq, Clone, Debug)]
 pub enum TypeDecl {
@@ -124,8 +124,11 @@ pub enum Type {
         /// A map of fields: <Name, Type>
         fields: HashMap<String, Self>,
 
-        /// A map of methods: <Name, (Type, Functions list index)>
+        /// A map of methods: <Name, (Type, functions/vtable index)>
         methods: HashMap<String, (Self, usize)>,
+
+        /// A hashmap of defined type variables, e.g. [T, U]
+        generics: HashMap<String, Self>,
     },
 
     /// An interface that other types can be compared against
@@ -203,11 +206,13 @@ impl PartialEq for Type {
                     name: n1,
                     fields: f1,
                     methods: m1,
+                    ..
                 },
                 Type::Struct {
                     name: n2,
                     fields: f2,
                     methods: m2,
+                    ..
                 },
             ) => {
                 // Compare names, if any

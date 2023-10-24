@@ -27,6 +27,15 @@ impl From<Entry> for Value {
     }
 }
 
+impl Into<Entry> for Value {
+    fn into(self) -> Entry {
+        match self {
+            Value::Usize(i) => Entry::Usize(i),
+            x => todo!("{:?}", x),
+        }
+    }
+}
+
 /// The stack is your normal stack-based abstraction, which of course cheats
 /// where applicable - elements may be modified in place or accessed at their indices
 /// rather than necessarily requiring pushing or poping.

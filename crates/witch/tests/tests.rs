@@ -55,7 +55,7 @@ fn closures() {
     use witch_compiler::compile;
     use witch_runtime::value::Value;
 
-    let expected = Value::Usize(14);
+    let expected = Value::Usize(30);
     let (bytecode, _) = compile(PathBuf::from("tests/fixtures/closures.witch"), None).unwrap();
     let mut vm = Vm::new();
     let result = vm.run(bytecode).unwrap();

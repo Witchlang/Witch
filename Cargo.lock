@@ -595,6 +595,16 @@ dependencies = [
  "hex",
  "logos",
  "miette",
+ "witch_parser",
+ "witch_runtime",
+ "witch_std",
+]
+
+[[package]]
+name = "witch_parser"
+version = "0.1.0"
+dependencies = [
+ "logos",
  "witch_runtime",
 ]
 
@@ -606,4 +616,12 @@ dependencies = [
  "hashbrown",
  "serde",
  "slab",
+]
+
+[[package]]
+name = "witch_std"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "witch_parser",
 ]

@@ -1,7 +1,9 @@
 //! The parser module is responsible for turning our Token iterator into an Abstract Syntax Tree.
 //! It does so using recursive descent, by combining multiple small parsing functions into larger chains.
 //! Expression precendence is built using the Pratt parsing algorithm.
-
+#![feature(type_alias_impl_trait)]
+#![feature(iter_advance_by)]
+#![feature(assert_matches)]
 use std::iter::Peekable;
 
 use logos::Span;
@@ -12,14 +14,14 @@ use lexer::Token;
 use crate::error::{Error, Result};
 use crate::types::Type;
 
-use self::{
-    ast::Ast,
-    lexer::{Kind, Lexer},
-};
+use self::lexer::{Kind, Lexer};
 pub mod ast;
+pub use ast::Ast;
 mod expression;
 mod statement;
 mod r#type;
+pub mod types;
+mod error;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Spanned<T>((T, Span));

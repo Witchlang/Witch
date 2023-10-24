@@ -1,0 +1,13 @@
+[package]
+name = "witch_std"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+
+[features]
+compiler = []
+
+[dependencies]
+witch_parser = { path = "../witch-parser" }
+serde = { version = "1.0.130", default-features = false, features = ["derive", "alloc", "rc"] }

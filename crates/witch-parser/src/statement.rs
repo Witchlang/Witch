@@ -1,10 +1,10 @@
 use std::path::PathBuf;
 
 use crate::error::Result;
-use crate::parser::lexer::{Kind, Lexer};
+use crate::lexer::{Kind, Lexer};
 
-use crate::parser::ast::Ast;
-use crate::parser::r#type::{enum_declaration, interface_declaration, struct_declaration};
+use crate::ast::Ast;
+use crate::r#type::{enum_declaration, interface_declaration, struct_declaration};
 use crate::types::Type;
 
 use super::expression::{expression, function_expression};
@@ -64,15 +64,9 @@ pub fn statement<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<Ast> {
             // id()
             let mut fork = p.fork();
             let mut fork2 = p.fork();
-            let assignment = if let Ok((ident, annotated_type, expr)) = assignment(&mut fork) {
+            let assignment = if let Ok((_, _, expr)) = assignment(&mut fork) {
                 *p = fork;
-                let end = p.cursor;
-                Ast::Let {
-                    ident,
-                    annotated_type,
-                    expr: Box::new(expr),
-                    span: start..end,
-                }
+                expr
             } else if let Ok((ident, expr)) = function_declaration(&mut fork2) {
                 *p = fork2;
                 let end = p.cursor;
@@ -95,25 +89,25 @@ pub fn statement<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<Ast> {
                 span: start..p.cursor,
             }
         }
-        // Some(Kind::KwLet) => {
-        //     p.consume(&Kind::KwLet)?;
-        //     let (ident, annotated_type, expr) = assignment(p)?;
-        //     let end = p.cursor;
-        //     let assignment = Ast::Let {
-        //         ident,
-        //         annotated_type,
-        //         expr: Box::new(expr),
-        //         span: start..end,
-        //     };
-        //     if p.at(Kind::Semicolon) {
-        //         p.consume(&Kind::Semicolon)?;
-        //     }
-        //     Ast::Statement {
-        //         stmt: Box::new(assignment),
-        //         rest: Box::new(statement(p)?),
-        //         span: start..end,
-        //     }
-        // }
+        Some(Kind::KwLet) => {
+            p.consume(&Kind::KwLet)?;
+            let (ident, annotated_type, expr) = assignment(p)?;
+            let end = p.cursor;
+            let assignment = Ast::Let {
+                ident,
+                annotated_type,
+                expr: Box::new(expr),
+                span: start..end,
+            };
+            if p.at(Kind::Semicolon) {
+                p.consume(&Kind::Semicolon)?;
+            }
+            Ast::Statement {
+                stmt: Box::new(assignment),
+                rest: Box::new(statement(p)?),
+                span: start..end,
+            }
+        }
         Some(Kind::KwReturn) => {
             p.consume(&Kind::KwReturn)?;
             let expr = Box::new(expression(p)?);

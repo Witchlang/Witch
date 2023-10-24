@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
 use crate::error::{Error, Result};
-use crate::parser::lexer::{Kind, Lexer};
+use crate::lexer::{Kind, Lexer};
 
-use crate::parser::ast::Ast;
+use crate::ast::Ast;
 use crate::types::TypeDecl;
 use crate::types::{EnumVariant, Type};
 
@@ -31,11 +31,11 @@ pub fn struct_declaration<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Resu
     let name = p.text(&token).to_string();
 
     // Possibly type variables
-    // <T, U>
-    let type_vars = if let Some(Kind::LAngle) = p.peek() {
-        p.consume(&Kind::LAngle)?;
+    // [T, U]
+    let type_vars = if let Some(Kind::LSquare) = p.peek() {
+        p.consume(&Kind::LSquare)?;
         let vars = p.repeating(vec![], Kind::Ident, Some(Kind::Comma))?;
-        p.consume(&Kind::RAngle)?;
+        p.consume(&Kind::RSquare)?;
         vars.iter()
             .map(|t| p.text(t).to_string())
             .collect::<Vec<String>>()
@@ -98,11 +98,11 @@ pub fn interface_declaration<'input>(p: &mut Parser<'input, Lexer<'input>>) -> R
     let name = p.text(&token).to_string();
 
     // Possibly type variables
-    // <T, U>
-    let type_vars = if let Some(Kind::LAngle) = p.peek() {
-        p.consume(&Kind::LAngle)?;
+    // [T, U]
+    let type_vars = if let Some(Kind::LSquare) = p.peek() {
+        p.consume(&Kind::LSquare)?;
         let vars = p.repeating(vec![], Kind::Ident, Some(Kind::Comma))?;
-        p.consume(&Kind::RAngle)?;
+        p.consume(&Kind::RSquare)?;
         vars.iter()
             .map(|t| p.text(t).to_string())
             .collect::<Vec<String>>()
@@ -267,7 +267,7 @@ fn it_lists_types() {
 /// (String, i32, Foo<Bar>) -> []String
 /// String
 /// []i32
-/// Foo<Bar<Baz>, i32>
+/// Foo[Bar[Baz], i32]
 /// Iterator + SomeInterface
 /// ```
 pub fn type_literal<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<Type> {
@@ -277,10 +277,10 @@ pub fn type_literal<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<Typ
             let ident = p.text(&token);
             let mut inner = vec![];
 
-            if p.at(Kind::LAngle) {
-                p.consume(&Kind::LAngle)?;
+            if p.at(Kind::LSquare) {
+                p.consume(&Kind::LSquare)?;
                 inner = list_types(p, inner)?;
-                p.consume(&Kind::RAngle)?;
+                p.consume(&Kind::RSquare)?;
             }
 
             Type::from_str(ident, inner)

@@ -1,9 +1,9 @@
-ho = "ho "
+let ho = "ho "
 
 function id [T](n: T) -> T {
    return n
 }
 
-multiplier = id(5) * 2 + id(4) - 11
+let multiplier = id(5) * 2 + id(4) - 11
 
 ho * multiplier
