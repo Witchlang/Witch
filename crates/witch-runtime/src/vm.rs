@@ -78,6 +78,8 @@ pub enum Op {
     Return,
     Call,
 
+    Collect,
+
     Crash,
 }
 
@@ -100,6 +102,9 @@ impl core::convert::From<u8> for Op {
             10 => Op::Binary,
             11 => Op::Return,
             12 => Op::Call,
+
+            13 => Op::Collect,
+
             _ => Op::Crash,
         }
     }
@@ -560,6 +565,18 @@ impl Vm {
                     //todo support native functions
 
                     offset = 1;
+                }
+
+                Op::Collect => {
+                    let vec_len = usize::from_ne_bytes(self.next_eight_bytes());
+                    let mut vec = vec![];
+                    for _ in 0..vec_len {
+                        vec.push(self.stack.pop().unwrap().into());
+                    }
+                    vec.reverse();
+                    self.stack
+                        .push(Entry::Pointer(self.heap.insert(Value::List(vec))));
+                    offset = 8;
                 }
 
                 x => {

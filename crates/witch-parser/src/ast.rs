@@ -92,8 +92,8 @@ pub enum Ast {
 
     // Assigns an expression to a variable.
     Assignment {
-        ident: String,
-        expr: Box<Self>,
+        lhs: Box<Self>,
+        rhs: Box<Self>,
         span: Range<usize>,
     },
 

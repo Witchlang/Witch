@@ -10,7 +10,7 @@
 
 use anyhow::Context as AContext;
 use anyhow::Result;
-use compiler::Cached;
+
 use compiler::Context;
 
 use std::{

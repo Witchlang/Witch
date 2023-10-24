@@ -81,6 +81,14 @@ pub fn expression_inner<'input>(
 
     expr = member_or_func_call(p, expr)?;
 
+    // If we find an = sign and we are a variable or member (e.g. foo.bar),
+    // we evaluate the rest as a new expression and return it as an assignment.
+    if p.at(Kind::Eq) && matches!(expr, Ast::Var(_) | Ast::Member { .. }) {
+        p.consume(&Kind::Eq)?;
+        let rhs = Box::new(expression(p)?);
+        return Ok(Ast::Assignment { lhs: Box::new(expr), rhs, span: start..p.cursor });
+    }
+
     loop {
         if let Some((op, kind)) = peek_operator(p) {
             if let Some((left_binding, right_binding)) = op.infix_binding() {

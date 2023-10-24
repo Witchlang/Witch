@@ -177,7 +177,7 @@ impl Context {
     /// Unflushed cached values get returned as a `prelude` bytecode and marked as such.
     /// Scopes and AST lineage of the context get reset.
     pub fn flush(&mut self) -> Vec<u8> {
-        let mut bc = self.prelude.take().unwrap_or(vec![]);
+        let mut bc = self.prelude.take().unwrap_or_default();
 
         let mut len: usize = 0;
         for cached in self.value_cache.iter_mut() {
@@ -249,7 +249,7 @@ pub fn compile<'a>(ctx: &mut Context, ast: &Ast) -> Result<(Vec<u8>, Type)> {
     ctx.lineage.push(ast.clone());
 
     let (bytecode, return_type) = match &ast {
-        Ast::Assignment { ident, expr, span } => assignment(ctx, ident, expr, span)?,
+        Ast::Assignment { lhs, rhs, span } => assignment(ctx, lhs, rhs, span)?,
         Ast::Call {
             expr,
             args,
@@ -266,16 +266,21 @@ pub fn compile<'a>(ctx: &mut Context, ast: &Ast) -> Result<(Vec<u8>, Type)> {
             predicate,
             then_,
             else_,
-            span,
+            span: _,
         } => if_(ctx, predicate, then_, else_)?,
         Ast::Infix { lhs, op, rhs, .. } => infix(ctx, lhs, op, rhs)?,
-        //  Ast::Member { container, key } => member(ctx, container, key)?,
         Ast::Let {
             ident,
             annotated_type,
             expr,
             span,
         } => let_(ctx, ident, annotated_type, expr, span)?,
+        Ast::List { items, span } => list(ctx, items, span)?,
+        Ast::Member {
+            container,
+            key,
+            span,
+        } => member(ctx, container, key, span)?,
         Ast::Return { expr, span: _ } => return_(ctx, expr)?,
         Ast::Statement { stmt, rest, span } => statement(ctx, stmt.clone(), rest.clone(), span)?,
         Ast::Struct {
@@ -296,11 +301,24 @@ pub fn compile<'a>(ctx: &mut Context, ast: &Ast) -> Result<(Vec<u8>, Type)> {
 /// It needs to either be mutable or the parent expr needs to be `Ast::Let`.
 fn assignment(
     ctx: &mut Context,
-    ident: &str,
-    expr: &Box<Ast>,
+    lhs: &Box<Ast>,
+    rhs: &Box<Ast>,
     _span: &Range<usize>,
 ) -> Result<(Vec<u8>, Type)> {
-    let (mut expr_bytes, expr_type) = compile(ctx, expr)?;
+    let mut member_key = None;
+    let ident = match *(lhs.clone()) {
+        Ast::Var(ident) => ident,
+        Ast::Member { container, key, .. } => match *container {
+            Ast::Var(ident) => {
+                member_key = Some(key);
+                ident
+            }
+            _ => unimplemented!(),
+        },
+        _ => unimplemented!(),
+    };
+
+    let (mut expr_bytes, expr_type) = compile(ctx, rhs)?;
 
     // Find a local var with the right name, get its index
     let mut local_variable = None;
@@ -504,11 +522,34 @@ fn function(
         generics,
     };
 
+    let mut arity = args.len();
+
     let current_function_type_copy = ctx.current_function_type.clone();
     ctx.current_function_type = Some(ty.clone());
 
     let mut scope = Scope::default();
-    // TODO add implicit self arg as local variable to this scope
+
+    // If the parent expression is a struct declaration, that means this is a method and so should have
+    // an implicit `self` variable injected
+    if let Ast::Type {
+        name,
+        decl: TypeDecl::Struct { .. },
+        ..
+    } = &ctx.lineage[ctx.lineage.len() - 2]
+    {
+        arity += 1;
+
+        scope.locals.push(LocalVariable {
+            name: "self".to_string(),
+            is_captured: false,
+            is_mutable: false,
+            r#type: Type::TypeVar {
+                name: name.clone(),
+                inner: vec![],
+            },
+        })
+    }
+
     for (arg_name, arg_type) in args.iter() {
         scope.locals.push(LocalVariable {
             name: arg_name.clone(),
@@ -563,11 +604,11 @@ fn function(
     let function = Value::Function(Function {
         is_variadic: *is_variadic,
         is_method,
-        arity: args.len(),
+        arity,
         bytecode: func_bytecode,
         upvalue_count,
         upvalues: vec![],
-        upvalues_bytecode: upvalues_bytecode,
+        upvalues_bytecode,
     });
 
     let (function_bytecode, _) = compile(ctx, &Ast::Value(function))?;
@@ -618,7 +659,6 @@ fn infix(ctx: &mut Context, a: &Box<Ast>, op: &Operator, b: &Box<Ast>) -> Result
     let (mut bytecode_b, b_type) = compile(ctx, b)?;
 
     if !a_type.allowed_infix_operators(&b_type).contains(op) {
-        dbg!(&ctx.lineage);
         panic!(
             "infix op {:?} not allowed between {:?} and {:?}",
             op, a_type, b_type
@@ -640,10 +680,21 @@ fn infix(ctx: &mut Context, a: &Box<Ast>, op: &Operator, b: &Box<Ast>) -> Result
     Ok((bytecode, return_type))
 }
 
-/// Accesses a member within an Object or Vector, by first putting the backing Object
-/// on the stack and subsequently the Key as an Access Opcode.
-fn member(_ctx: &mut Context, _container: &Box<Ast>, _key: &Box<Ast>) -> Result<(Vec<u8>, Type)> {
-    Ok((vec![], Type::Unknown))
+/// Accesses a member within a Struct, Module or Enum.
+/// E.g. foo.bar
+fn member(
+    ctx: &mut Context,
+    container: &Box<Ast>,
+    _key: &String,
+    _span: &Range<usize>,
+) -> Result<(Vec<u8>, Type)> {
+    // Put the containing object on the stack
+    // NOTE: In the case of Enums, `bc` will be empty and we just care about `expr_type`.
+    let (bytecode, container_type) = compile(ctx, container)?;
+    dbg!(&container_type);
+    // deduce contents
+
+    Ok((bytecode, Type::Unknown))
 }
 
 /// Pops the current call frame
@@ -679,7 +730,7 @@ fn statement(
 fn struct_literal(
     ctx: &mut Context,
     ident: &Option<String>,
-    fields: &HashMap<String, Ast>,
+    _fields: &HashMap<String, Ast>,
     _span: &Range<usize>,
 ) -> Result<(Vec<u8>, Type)> {
     let mut return_type = Type::Unknown;
@@ -906,8 +957,35 @@ fn let_(
     Ok((assignment_bytes, assignment_type))
 }
 
+/// Evaluates a list literal
+fn list(ctx: &mut Context, items: &Vec<Ast>, _span: &Range<usize>) -> Result<(Vec<u8>, Type)> {
+    let mut bytecode = vec![];
+    let length: [u8; std::mem::size_of::<usize>()] = items.len().to_ne_bytes();
+
+    let mut list_type = Type::Unknown;
+    for ast in items {
+        let (mut bc, item_type) = compile(ctx, ast)?;
+        bytecode.append(&mut bc);
+        match list_type {
+            Type::Unknown => list_type = item_type,
+            ty if ty != item_type => {
+                panic!(
+                    "attempted to use different types in vec! {:?}, {:?}",
+                    &ty, &item_type
+                );
+            }
+            _ => {}
+        }
+    }
+
+    bytecode.push(Op::Collect as u8);
+    bytecode.append(&mut length.to_vec());
+
+    Ok((bytecode, Type::List(Box::new(list_type))))
+}
+
 /// Raw values get emitted into the bytecode as <usize length><bytes>.
-fn value(ctx: &mut Context, value: &Value) -> Result<(Vec<u8>, Type)> {
+fn value(_ctx: &mut Context, value: &Value) -> Result<(Vec<u8>, Type)> {
     let mut value_bytecode = vec![];
     let mut bytes = util::serialize_value(value.clone())?;
     let length: [u8; std::mem::size_of::<usize>()] = bytes.len().to_ne_bytes();
@@ -942,7 +1020,7 @@ fn var(ctx: &mut Context, ident: &String) -> Result<(Vec<u8>, Type)> {
     } else if let Some((idx, return_type)) = ctx.resolve_upvalue(ident, ctx.scopes.len() - 1)? {
         return Ok((vec![Op::GetUpvalue as u8, idx as u8], return_type));
     } else {
-        dbg!(&ident, &ctx.scope()?.locals);
+        dbg!(ident);
         todo!();
         // If we dont find a variable with this name, it may be an Enum type
         // used in an Entry/Call expression.

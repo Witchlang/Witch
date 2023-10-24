@@ -8,8 +8,8 @@ struct Iterator[T] {
     data: T
     
     function next() -> T {
-        let value = self.data[cursor]
-        let cursor = cursor + 1
+        let value = self.data[self.cursor]
+        self.cursor = self.cursor + 1
         return value
     }
 }
@@ -24,3 +24,4 @@ function iter[T](data: T) -> Iterator[T] {
         data
     }
 }
+

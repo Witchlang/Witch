@@ -60,43 +60,39 @@ pub fn statement<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<Ast> {
             // or function declarations (which are actually assignments)
             // or expressions:
             // xyz = 1
+            // foo.bar = bar.foo
             // id () -> { 5-1 }
             // id()
-            let mut fork = p.fork();
-            let mut fork2 = p.fork();
-            let assignment = if let Ok((_, _, expr)) = assignment(&mut fork) {
-                *p = fork;
-                expr
-            } else if let Ok((ident, expr)) = function_declaration(&mut fork2) {
-                *p = fork2;
-                let end = p.cursor;
-                Ast::Let {
-                    ident,
-                    annotated_type: None,
-                    expr: Box::new(expr),
-                    span: start..end,
-                }
-            } else {
-                expression(p)?
-            };
+            let expr =  expression(p)?;
 
             if p.at(Kind::Semicolon) {
                 p.consume(&Kind::Semicolon)?;
             }
             Ast::Statement {
-                stmt: Box::new(assignment),
+                stmt: Box::new(expr),
                 rest: Box::new(statement(p)?),
                 span: start..p.cursor,
             }
         }
         Some(Kind::KwLet) => {
             p.consume(&Kind::KwLet)?;
-            let (ident, annotated_type, expr) = assignment(p)?;
+            let (annotated_type, assignment) = assignment(p)?;
             let end = p.cursor;
+
+            let ident = match assignment.clone() {
+                Ast::Assignment { lhs, .. } => {
+                    match *lhs {
+                        Ast::Var(ident) => ident,
+                        _ => unimplemented!()
+                    }
+                },
+                _ => unimplemented!()
+            };
+
             let assignment = Ast::Let {
                 ident,
                 annotated_type,
-                expr: Box::new(expr),
+                expr: Box::new(assignment),
                 span: start..end,
             };
             if p.at(Kind::Semicolon) {
@@ -168,10 +164,11 @@ pub fn statement<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<Ast> {
 
 fn assignment<'input>(
     p: &mut Parser<'input, Lexer<'input>>,
-) -> Result<(String, Option<Type>, Ast)> {
+) -> Result<(Option<Type>, Ast)> {
+    
     let start = p.cursor;
     let token = p.consume(&Kind::Ident)?;
-    let ident = p.text(&token).to_string();
+    let name = p.text(&token).to_string();
 
     let annotated_type = if p.at(Kind::Colon) {
         let _ = p.consume(&Kind::Colon)?;
@@ -182,17 +179,13 @@ fn assignment<'input>(
 
     p.consume(&Kind::Eq)?;
 
-    let expr = Box::new(expression(p)?);
+    let rhs = Box::new(expression(p)?);
 
-    Ok((
-        ident.clone(),
-        annotated_type,
-        Ast::Assignment {
-            ident,
-            expr,
-            span: start..p.cursor,
-        },
-    ))
+    Ok((annotated_type, Ast::Assignment {
+        lhs: Box::new(Ast::Var(name)),
+        rhs,
+        span: start..p.cursor,
+    }))
 }
 
 /// Parses an if statement with an optional else statement afterwards.
