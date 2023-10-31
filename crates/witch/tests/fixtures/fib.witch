@@ -7,5 +7,3 @@ function fib (n: usize) -> usize {
 }
 
 fib(10)
-
-iter([1, 2, 3]).next()

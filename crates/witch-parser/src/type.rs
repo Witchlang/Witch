@@ -44,10 +44,7 @@ pub fn struct_declaration<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Resu
     };
 
     // Possibly constraints for the type variables
-    let constraints = vec![];
-    if p.at(Kind::KwWhere) {
-        todo!("interface generic constraints not yet implemented");
-    }
+    let constraints = where_constraints(p)?;
 
     let mut generics = HashMap::default();
     for v in type_vars.into_iter() {
@@ -60,7 +57,7 @@ pub fn struct_declaration<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Resu
     // Start the block
     p.consume(&Kind::LBrace)?;
 
-    let fields = properties(p, Kind::Semicolon, HashMap::default())?;
+    let fields = properties(p, Kind::Semicolon, vec![])?;
 
     let mut methods = vec![];
     while p.at(Kind::KwFn) {
@@ -111,23 +108,22 @@ pub fn interface_declaration<'input>(p: &mut Parser<'input, Lexer<'input>>) -> R
     };
 
     // Possibly constraints for the type variables
-    let constraints = vec![];
-    if p.at(Kind::KwWhere) {
-        todo!("interface generic constraints not yet implemented");
-    }
+    let constraints = where_constraints(p)?;
 
-    let mut generics = HashMap::default();
+    let mut generics = vec![];
     for v in type_vars.into_iter() {
-        generics.insert(v, Type::Any);
-    }
-    for (k, v) in constraints.into_iter() {
-        generics.entry(k).and_modify(|e| *e = v);
+        generics.push((
+            v.clone(),
+            constraints.get(&v).unwrap_or(&Type::Any).to_owned(),
+        ));
     }
 
     // Start the block
     p.consume(&Kind::LBrace)?;
 
-    let properties = properties(p, Kind::Semicolon, HashMap::default())?;
+    let properties = properties(p, Kind::Semicolon, vec![])?
+        .into_iter()
+        .collect::<HashMap<String, Type>>();
 
     // End block
     p.consume(&Kind::RBrace)?;
@@ -150,16 +146,16 @@ pub fn interface_declaration<'input>(p: &mut Parser<'input, Lexer<'input>>) -> R
 pub fn properties<'input>(
     p: &mut Parser<'input, Lexer<'input>>,
     separator: Kind,
-    mut properties_: HashMap<String, Type>,
-) -> Result<HashMap<String, Type>> {
+    mut properties_: Vec<(String, Type)>,
+) -> Result<Vec<(String, Type)>> {
     let token = p.consume(&Kind::Ident)?;
     let name = p.text(&token).to_string();
     p.consume(&Kind::Colon)?;
     let ty = type_literal(p)?;
-    properties_.insert(name, ty);
+    properties_.push((name, ty));
     let res = match p.peek() {
         Some(next) if next == separator => {
-            p.consume(&Kind::Semicolon)?;
+            p.consume(&separator)?;
             if p.at(Kind::Ident) {
                 properties(p, separator, properties_)?
             } else {

@@ -1,3 +1,6 @@
+use core::cell::{RefCell};
+
+use alloc::rc::Rc;
 use alloc::vec;
 use alloc::vec::Vec;
 use serde::{Deserialize, Serialize};
@@ -15,7 +18,7 @@ enum Upvalue {
     Open(usize),
 
     /// Points to a different upvalue
-    Link(usize)
+    Link(usize),
 }
 
 #[repr(u8)]
@@ -69,7 +72,9 @@ pub enum Op {
     Push,
     Get,
     GetUpvalue,
+    GetMember,
     Set,
+    SetProperty,
 
     Jump,
     JumpIfFalse,
@@ -94,16 +99,18 @@ impl core::convert::From<u8> for Op {
             4 => Op::Push,
             5 => Op::Get,
             6 => Op::GetUpvalue,
-            7 => Op::Set,
+            7 => Op::GetMember,
+            8 => Op::Set,
+            9 => Op::SetProperty,
 
-            8 => Op::Jump,
-            9 => Op::JumpIfFalse,
+            10 => Op::Jump,
+            11 => Op::JumpIfFalse,
 
-            10 => Op::Binary,
-            11 => Op::Return,
-            12 => Op::Call,
+            12 => Op::Binary,
+            13 => Op::Return,
+            14 => Op::Call,
 
-            13 => Op::Collect,
+            15 => Op::Collect,
 
             _ => Op::Crash,
         }
@@ -122,7 +129,7 @@ pub struct Vm {
     heap: Heap,
     frames: Vec<CallFrame>,
 
-    /// Our function vtable. Struct methods go here. 
+    /// Our function vtable. Struct methods go here.
     functions: Vec<Function>,
 
     /// A vec of pointers to the Heap, where we store our upvalues for closures
@@ -164,32 +171,41 @@ impl Vm {
     }
 
     /// Retrieves the byte which the instruction pointer is currently pointing at.
-    fn current_byte(&self) -> u8 {
+    fn current_byte(&mut self) -> u8 {
         self.deref_function(self.frame().ptr).bytecode[self.frame().ip]
     }
 
     /// Retrieves the byte which is after the byte that the instruction pointer is currently pointing at.
-    fn next_byte(&self) -> u8 {
+    fn next_byte(&mut self) -> u8 {
         self.deref_function(self.frame().ptr).bytecode[self.frame().ip + 1]
     }
 
     /// Retrieves the next 8 bytes from the current instruction pointer.
-    fn next_eight_bytes(&self) -> [u8; 8] {
+    fn next_eight_bytes(&mut self) -> [u8; 8] {
         self.deref_function(self.frame().ptr).bytecode[self.frame().ip + 1..self.frame().ip + 1 + 8]
             .try_into()
             .unwrap()
     }
 
-    fn deref(&self, ptr: Pointer) -> &Value {
-        match ptr {
-            Pointer(idx) => self.heap.get(idx),
-            _ => todo!(),
+    fn to_value(&mut self, entry: Entry) -> Rc<RefCell<Value>> {
+        match entry {
+            Entry::Pointer(Pointer(idx)) => self.heap.get(idx),
+            Entry::OffsetPointer(Pointer(ptr), idx) => {
+                if let Value::List(ref list) = *self.heap.get(ptr).borrow() {
+                    Rc::new(RefCell::new(list[idx].clone()))
+                } else {
+                    unreachable!()
+                }
+            }
+            Entry::Usize(u) => Rc::new(RefCell::new(Value::Usize(u))),
+            x => todo!("{:?}", x),
         }
     }
 
-    fn deref_function(&self, ptr: Pointer) -> &Function {
-        if let Value::Function(f) = self.deref(ptr) {
-            return f;
+    // FIXME this shuldnt clone f
+    fn deref_function(&mut self, ptr: Pointer) -> Function {
+        if let Value::Function(ref f) = *self.to_value(Entry::Pointer(ptr)).clone().borrow() {
+            return f.clone();
         }
         unreachable!()
     }
@@ -199,21 +215,18 @@ impl Vm {
     /// TODO Make it less naive so we dont capture upvalues more than once if necessary
     fn capture_upvalue(&mut self, idx: usize) -> usize {
         self.upvalues.push(Upvalue::Open(idx));
-        dbg!(idx);
-        return self.upvalues.len() - 1;
+        self.upvalues.len() - 1
     }
 
     fn link_upvalue(&mut self, idx: usize) -> usize {
         self.upvalues.push(Upvalue::Link(idx));
-        return self.upvalues.len() - 1;
+        self.upvalues.len() - 1
     }
 
     /// Moves a stack entry to the heap and stashes a copy of the pointer
     /// among our `upvalues` to be referenced by a closure at a later time
     fn close_upvalues(&mut self, frame: CallFrame) {
-        
-        for idx in (0..self.upvalues.len()).rev() { 
-           
+        for idx in (0..self.upvalues.len()).rev() {
             if let Upvalue::Open(stack_index) = self.upvalues[idx] {
                 if stack_index >= frame.stack_start {
                     let entry = self.stack.get(stack_index);
@@ -221,21 +234,19 @@ impl Vm {
                         self.upvalues[idx] = Upvalue::Closed(ptr);
                     } else {
                         let ptr = self.heap.insert(entry.into());
-                        self.upvalues[idx] = Upvalue::Closed(ptr);
+                        self.upvalues[idx] = Upvalue::Closed(Pointer(ptr));
                     }
                 } else {
                     // If we reach open upvalues poiting to stack entries below our stack_start,
                     // we can bail out early
                     break;
                 }
-                
             }
-
-    }
+        }
     }
 
     pub fn push_callframe(&mut self, ptr: Pointer, offset: usize) {
-        if let Value::Function(f) = self.deref(ptr) {
+        if let Value::Function(f) = (self.to_value(Entry::Pointer(ptr))).borrow().clone() {
             let frame = CallFrame {
                 ip: 0,
                 stack_start: self.stack.len() - f.arity,
@@ -268,7 +279,7 @@ impl Vm {
         let frame = CallFrame {
             ip: 0,
             stack_start: 0,
-            ptr,
+            ptr: Pointer(ptr),
         };
         self.frames.push(frame);
 
@@ -355,11 +366,8 @@ impl Vm {
                         items.push(self.stack.pop().unwrap());
                     }
                     for e in items.iter().rev() {
-                        if let Entry::Pointer(p) = *e {
-                            let value = self.deref(p).clone();
-                            if let Value::Function(f) = value {
-                                self.functions.push(f.to_owned());
-                            }
+                        if let Value::Function(ref f) = self.to_value(*e).borrow().clone() {
+                            self.functions.push(f.clone());
                         }
                     }
                     offset = 8;
@@ -388,7 +396,6 @@ impl Vm {
                         Value::Bool(b) => Entry::Bool(b),
                         // Todo all primitive types that get to be stack entries
                         _ => {
-
                             // For functions, we need to resolve upvalues before putting it on the heap
                             if let Value::Function(mut f) = value {
                                 for (i, x) in f
@@ -414,16 +421,16 @@ impl Vm {
                                     // If it's not local, that means it refers to an upvalue among
                                     // this callframe's upvalues, which in turn refers to something else.
                                     } else {
+                                        let func = self.deref_function(self.frame().ptr);
                                         f.upvalues.insert(
                                             i,
-                                            self.link_upvalue(self.deref_function(self.frame().ptr).upvalues
-                                                [idx as usize]),
+                                            self.link_upvalue(func.upvalues[idx as usize]),
                                         )
                                     }
                                 }
                                 value = Value::Function(f);
                             }
-                            Entry::Pointer(self.heap.insert(value))
+                            Entry::Pointer(Pointer(self.heap.insert(value)))
                         }
                     };
 
@@ -441,7 +448,6 @@ impl Vm {
                 }
 
                 Op::GetUpvalue => {
-
                     let slot = self.next_byte();
                     let idx = self.deref_function(self.frame().ptr).upvalues[slot as usize];
 
@@ -451,13 +457,25 @@ impl Vm {
                         upv = &self.upvalues[*idx];
                     }
 
-                
                     let entry = match upv {
                         Upvalue::Closed(ptr) => Entry::Pointer(*ptr),
                         Upvalue::Open(idx) => self.stack.get(*idx),
-                        _ => unreachable!()
+                        _ => unreachable!(),
                     };
                     self.stack.push(entry);
+
+                    offset = 1;
+                }
+
+                // Gets a list item by index
+                Op::GetMember => {
+                    let idx = self.next_byte();
+                    let entry = self.stack.last_mut().unwrap();
+
+                    *entry = match entry {
+                        Entry::Pointer(ref ptr) => Entry::OffsetPointer(*ptr, idx as usize),
+                        _ => unreachable!(),
+                    };
 
                     offset = 1;
                 }
@@ -486,6 +504,23 @@ impl Vm {
                     offset = 1;
                 }
 
+                Op::SetProperty => {
+                    let idx = self.next_byte();
+                    let property_idx = self.next_byte();
+                    let rhs = self.stack.pop().unwrap();
+
+                    let entry = self.stack.get(self.frame().stack_start + idx as usize);
+
+                    let container_ptr = self.to_value(entry).clone();
+                    if let Value::List(ref mut vec) = *(container_ptr.borrow_mut()) {
+                        (*vec)[property_idx as usize] = self.to_value(rhs).borrow().to_owned();
+                    } else {
+                        unreachable!();
+                    }
+
+                    offset = 2;
+                }
+
                 Op::Jump => {}
 
                 Op::JumpIfFalse => {
@@ -498,42 +533,46 @@ impl Vm {
                 }
 
                 // Conducts a binary operation between the two top entries on the stack.
-                // The right-hand side is popped off the stack, while the left-hand side is edited
-                // in place with the result.
                 Op::Binary => {
                     let bin_op = InfixOp::from(self.next_byte());
-                    let mut b = self.stack.pop().unwrap();
-                    let mut a = self.stack.pop().unwrap();
+                    let b = self.stack.pop().unwrap();
+                    let a = self.stack.pop().unwrap();
 
-
-                    if let Entry::Pointer(ptr) = a {
-                        let v: Value = (*(&self.deref(ptr))).clone().into();
-                        a = v.into();
-                    }
-
-                    if let Entry::Pointer(ptr) = b {
-                        let v: Value = (*(&self.deref(ptr))).clone().into();
-                        b = v.into();
-                    }
-                    
                     let r = match (a, bin_op, b) {
                         (Entry::Usize(a), InfixOp::Add, Entry::Usize(b)) => Entry::Usize(a + b),
                         (Entry::Usize(a), InfixOp::Sub, Entry::Usize(b)) => Entry::Usize(a - b),
                         (Entry::Usize(a), InfixOp::Mul, Entry::Usize(b)) => Entry::Usize(a * b),
                         (Entry::Usize(a), InfixOp::Div, Entry::Usize(b)) => Entry::Usize(a / b),
-
                         (Entry::Usize(a), InfixOp::Lt, Entry::Usize(b)) => Entry::Bool(a < b),
 
-                        (x, op, y) => {
-                          //  dbg!(&x, &op, &y);
+                        (e1 @ Entry::Pointer(_), op, e2)
+                        | (e1, op, e2 @ Entry::Pointer(_)) => {
+                            match (
+                                &*self.to_value(e1).borrow(),
+                                op,
+                                &*self.to_value(e2).borrow(),
+                            ) {
+                                (Value::Usize(a), InfixOp::Add, Value::Usize(b)) => {
+                                    Entry::Usize(a + b)
+                                }
+
+                                (Value::String(a), InfixOp::Mul, Value::Usize(b)) => {
+                                    Entry::Pointer(Pointer(
+                                        self.heap.insert(Value::String(a.repeat(*b))),
+                                    ))
+                                }
+
+                                _ => todo!(),
+                            }
+                        }
+
+                        (_x, _op, _y) => {
                             unreachable!()
-                          //  todo!("binary op {:?} {:?} {:?}", x, op, y)
                         }
                     };
                     self.stack.push(r);
                     offset = 1;
                 }
-                
 
                 // Pops the current callframe, truncates the stack to its original size
                 // and puts the return value on top of it.
@@ -575,7 +614,7 @@ impl Vm {
                     }
                     vec.reverse();
                     self.stack
-                        .push(Entry::Pointer(self.heap.insert(Value::List(vec))));
+                        .push(Entry::Pointer(Pointer(self.heap.insert(Value::List(vec)))));
                     offset = 8;
                 }
 
@@ -602,11 +641,8 @@ impl Vm {
 
         // When the script exits, return whatever is on the top of the stack
         if let Some(entry) = self.stack.pop() {
-            let value = match entry {
-                Entry::Pointer(p) => self.deref(p).to_owned(),
-                v => v.into(),
-            };
-            Ok(value)
+            let value = self.to_value(entry);
+            Ok((*value).clone().borrow().to_owned())
         } else {
             Ok(Value::Void)
         }

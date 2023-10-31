@@ -6,6 +6,13 @@ use crate::types::{Type, TypeDecl};
 
 use super::Spanned;
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum Key {
+    Usize(usize),
+    String(String),
+    Expression(Box<Ast>),
+}
+
 #[repr(u8)]
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum Operator {
@@ -140,7 +147,7 @@ pub enum Ast {
     // such as items in lists, functions in modules, variants in enums or fields in structs.
     Member {
         container: Box<Self>,
-        key: String,
+        key: Key,
         span: Range<usize>,
     },
 

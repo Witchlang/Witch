@@ -7,7 +7,7 @@ fn basic() {
     use witch_compiler::compile;
     use witch_runtime::value::Value;
 
-    let expected = Value::Usize(14);
+    let expected = Value::String("HelloHelloHello".to_string());
     let (bytecode, _) = compile(PathBuf::from("tests/fixtures/basic.witch"), None).unwrap();
     let mut vm = Vm::new();
     let result = vm.run(bytecode).unwrap();
@@ -57,6 +57,22 @@ fn closures() {
 
     let expected = Value::Usize(30);
     let (bytecode, _) = compile(PathBuf::from("tests/fixtures/closures.witch"), None).unwrap();
+    let mut vm = Vm::new();
+    let result = vm.run(bytecode).unwrap();
+    assert_eq!(expected, result);
+}
+
+#[cfg(feature = "compiler")]
+#[test]
+fn lists() {
+    use std::path::PathBuf;
+
+    use witch::Vm;
+    use witch_compiler::compile;
+    use witch_runtime::value::Value;
+
+    let expected = Value::Usize(3);
+    let (bytecode, _) = compile(PathBuf::from("tests/fixtures/lists.witch"), None).unwrap();
     let mut vm = Vm::new();
     let result = vm.run(bytecode).unwrap();
     assert_eq!(expected, result);

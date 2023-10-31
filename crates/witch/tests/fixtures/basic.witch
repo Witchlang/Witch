@@ -1,4 +1,4 @@
-let ho = "ho "
+let greeting = "Hello"
 
 function id [T](n: T) -> T {
    return n
@@ -6,4 +6,4 @@ function id [T](n: T) -> T {
 
 let multiplier = id(5) * 2 + id(4) - 11
 
-ho * multiplier
+greeting * multiplier

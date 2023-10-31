@@ -1,3 +1,5 @@
+
+
 use alloc::vec;
 use alloc::vec::Vec;
 
@@ -14,6 +16,9 @@ pub enum Entry {
     Usize(usize),
     Bool(bool),
     Pointer(Pointer),
+
+    /// A pointer to a value inside another value on the heap
+    OffsetPointer(Pointer, usize),
 }
 
 impl From<Entry> for Value {
@@ -27,9 +32,9 @@ impl From<Entry> for Value {
     }
 }
 
-impl Into<Entry> for Value {
-    fn into(self) -> Entry {
-        match self {
+impl From<Value> for Entry {
+    fn from(val: Value) -> Self {
+        match val {
             Value::Usize(i) => Entry::Usize(i),
             x => todo!("{:?}", x),
         }

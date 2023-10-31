@@ -17,11 +17,11 @@ use crate::types::Type;
 use self::lexer::{Kind, Lexer};
 pub mod ast;
 pub use ast::Ast;
+mod error;
 mod expression;
 mod statement;
 mod r#type;
 pub mod types;
-mod error;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Spanned<T>((T, Span));

@@ -1,4 +1,8 @@
-struct Iterator[T] {
+interface Index[Idx, Output] {
+    index: (Idx) -> Output
+}
+
+struct Iterator[T] where T: Index {
     
     # Holds the current index for the iterable
     # TODO: Generic over the indexable type, such as keys for maps etc

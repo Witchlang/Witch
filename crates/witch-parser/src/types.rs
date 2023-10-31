@@ -9,11 +9,11 @@ use crate::ast::{Ast, Operator};
 pub enum TypeDecl {
     Struct {
         generics: HashMap<String, Type>,
-        fields: HashMap<String, Type>,
+        fields: Vec<(String, Type)>,
         methods: Vec<(String, Ast)>,
     },
     Interface {
-        generics: HashMap<String, Type>,
+        generics: Vec<(String, Type)>,
         properties: HashMap<String, Type>,
     },
     Enum {
@@ -121,8 +121,10 @@ pub enum Type {
         /// None of its an anonymous struct
         name: Option<String>,
 
-        /// A map of fields: <Name, Type>
-        fields: HashMap<String, Self>,
+        /// Since a Struct is represented by a List at runtime,
+        /// fields need to be represented as a vec here to preserve
+        /// their order
+        fields: Vec<(String, Self)>,
 
         /// A map of methods: <Name, (Type, functions/vtable index)>
         methods: HashMap<String, (Self, usize)>,
@@ -138,6 +140,9 @@ pub enum Type {
 
         /// A map of properties to compare against: <Name, Type>
         properties: HashMap<String, Self>,
+
+        /// A hashmap of defined type variables, e.g. [T, U]
+        generics: Vec<(String, Self)>,
     },
 
     /// An enum is simply a list of its variants.
@@ -221,7 +226,7 @@ impl PartialEq for Type {
                 }
 
                 // Compare fields, if any
-                for (key, fieldtype1) in f1 {
+                for (key, fieldtype1) in f1.iter().enumerate() {
                     if let Some(fieldtype2) = f2.get(key) {
                         if fieldtype1 != fieldtype2 {
                             return false;
@@ -260,10 +265,14 @@ impl PartialEq for Type {
                             return false;
                         }
                     // If it's not a method, check the fields
-                    } else if let Some(field_type) = fields.get(name) {
-                        if ty != field_type {
-                            return false;
-                        }
+                    } else if fields
+                        .iter()
+                        .filter(|(field_name, field_type)| field_name == name && field_type == ty)
+                        .collect::<Vec<_>>()
+                        .len()
+                        != 1
+                    {
+                        return false;
                     // Property does not have a corresponding method or field
                     } else {
                         return false;
@@ -351,6 +360,7 @@ impl Type {
             "u128" => Type::U128,
             "isize" => Type::Isize,
             "usize" => Type::Usize,
+
             _ => Type::TypeVar {
                 name: str.to_string(),
                 inner,

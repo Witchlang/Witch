@@ -1,7 +1,7 @@
 use alloc::{string::String, vec, vec::Vec};
 use serde::{Deserialize, Serialize};
 
-use crate::stack::Pointer;
+
 
 #[derive(Serialize, Debug, Deserialize, PartialEq, Clone)]
 #[repr(C, u8)]
@@ -26,14 +26,14 @@ pub enum Value {
     Usize(usize),
     Char(char),
     F32(f32),
-    F64(f64)
+    F64(f64),
 }
 
-impl Into<usize> for Value {
-    fn into(self) -> usize {
-        match self {
+impl From<Value> for usize {
+    fn from(val: Value) -> Self {
+        match val {
             Value::Usize(i) => i,
-        _ => unreachable!(),
+            _ => unreachable!(),
         }
     }
 }

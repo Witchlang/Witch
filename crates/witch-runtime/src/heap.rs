@@ -1,23 +1,23 @@
+use alloc::rc::Rc;
+use core::{cell::RefCell};
 use slab::Slab;
 
-use crate::{stack::Pointer, value::Value};
+use crate::value::Value;
 
 #[derive(Default)]
 pub struct Heap {
-    mem: Slab<Value>,
+    mem: Slab<Rc<RefCell<Value>>>,
 }
 
 impl Heap {
-    pub fn insert(&mut self, value: Value) -> Pointer {
-        Pointer(self.mem.insert(value))
+    pub fn insert(&mut self, value: Value) -> usize {
+        self.mem.insert(Rc::new(value.into()))
     }
 
-    pub fn get(&self, key: usize) -> &Value {
-        self.mem.get(key).unwrap()
+    pub fn get(&mut self, key: usize) -> Rc<RefCell<Value>> {
+        self.mem.get_mut(key).unwrap().clone()
     }
 }
-
-
 
 // #[derive(Debug)]
 // pub struct Handle {

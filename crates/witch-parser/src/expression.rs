@@ -1,6 +1,6 @@
-use crate::error::Result;
 use crate::types::Type;
-use std::collections::HashMap;
+use crate::{ast::Key, error::Result};
+use std::{collections::HashMap};
 use witch_runtime::value::Value;
 
 use super::{
@@ -86,7 +86,11 @@ pub fn expression_inner<'input>(
     if p.at(Kind::Eq) && matches!(expr, Ast::Var(_) | Ast::Member { .. }) {
         p.consume(&Kind::Eq)?;
         let rhs = Box::new(expression(p)?);
-        return Ok(Ast::Assignment { lhs: Box::new(expr), rhs, span: start..p.cursor });
+        return Ok(Ast::Assignment {
+            lhs: Box::new(expr),
+            rhs,
+            span: start..p.cursor,
+        });
     }
 
     loop {
@@ -164,6 +168,27 @@ pub fn member_or_func_call<'input>(
             p.consume(&Kind::Dot)?;
             let token = p.consume(&Kind::Ident)?;
             let key = p.text(&token).to_string();
+            member_or_func_call(
+                p,
+                Ast::Member {
+                    container: Box::new(expr),
+                    key: Key::String(key),
+                    span: start..p.cursor,
+                },
+            )
+        }
+
+        Some(Kind::LSquare) => {
+            p.consume(&Kind::LSquare)?;
+            let key_expr = Box::new(expression(p)?);
+            p.consume(&Kind::RSquare)?;
+
+            let key = if let Ast::Value(Value::Usize(usize)) = *key_expr {
+                Key::Usize(usize)
+            } else {
+                Key::Expression(key_expr)
+            };
+
             member_or_func_call(
                 p,
                 Ast::Member {
@@ -356,7 +381,9 @@ pub fn where_constraints<'input>(
     let mut constraints = HashMap::default();
     if p.at(Kind::KwWhere) {
         p.consume(&Kind::KwWhere)?;
-        constraints = properties(p, Kind::Comma, constraints)?;
+        constraints = properties(p, Kind::Comma, vec![])?
+            .into_iter()
+            .collect::<HashMap<String, Type>>();
     }
 
     Ok(constraints)

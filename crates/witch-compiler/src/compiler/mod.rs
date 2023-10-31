@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::ops::Range;
 
 use crate::error::{Error, Result};
-use witch_parser::ast::{Ast, Operator};
+use witch_parser::ast::{Ast, Key, Operator};
 use witch_parser::types::{Type, TypeDecl};
 use witch_runtime::value::{Function, Value};
 use witch_runtime::vm::Op;
@@ -32,6 +32,8 @@ pub struct LocalVariable {
 pub struct Scope {
     pub locals: Vec<LocalVariable>,
     pub types: HashMap<String, Type>,
+    /// Generic constraints for this scope, if any
+    pub generics: HashMap<String, Type>,
     pub upvalues: Vec<Upvalue>,
 }
 
@@ -48,6 +50,16 @@ impl Scope {
 
         self.upvalues.push(Upvalue { index, is_local });
         Some(self.upvalues.len() - 1)
+    }
+
+    /// Convenience function to get the index number and data of a local variable
+    pub fn get_local(&self, ident: &str) -> Option<(usize, LocalVariable)> {
+        for (i, local) in self.locals.iter().enumerate() {
+            if local.name == ident {
+                return Some((i, local.clone()));
+            }
+        }
+        None
     }
 }
 
@@ -108,11 +120,28 @@ impl Context {
         }
 
         match ty {
-            Type::TypeVar { name, .. } => {
+            Type::TypeVar { name, inner } => {
                 // Start with the current scope and walk upwards.
                 for scope in self.scopes.iter().rev() {
-                    dbg!(&name, &scope);
-                    // TODO check generics first and handle inner types
+                    if scope.generics.contains_key(&name) {
+                        let mut ty = self.resolve_type(scope.generics.get(&name).unwrap().clone());
+
+                        match ty {
+                            Type::Interface {
+                                ref mut generics, ..
+                            } => {
+                                // type check generics against inner types, if any, and then replace the constraints
+                                for (idx, i) in inner.into_iter().enumerate() {
+                                    if generics[idx].1 == i {
+                                        generics[idx].1 = i;
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                        return ty;
+                    }
+
                     if scope.types.contains_key(&name) {
                         return scope.types.get(&name).unwrap().clone();
                     }
@@ -299,6 +328,7 @@ pub fn compile<'a>(ctx: &mut Context, ast: &Ast) -> Result<(Vec<u8>, Type)> {
 
 /// Assigns a local variable by setting its new value without initializing it.
 /// It needs to either be mutable or the parent expr needs to be `Ast::Let`.
+/// TODO: assign to list items, e.g. let x = [1, 2, 3]; x[2] = 4
 fn assignment(
     ctx: &mut Context,
     lhs: &Box<Ast>,
@@ -320,27 +350,40 @@ fn assignment(
 
     let (mut expr_bytes, expr_type) = compile(ctx, rhs)?;
 
-    // Find a local var with the right name, get its index
-    let mut local_variable = None;
-    for (i, local) in ctx.scope()?.locals.iter().enumerate() {
-        if local.name == ident {
-            local_variable = Some((i, local));
-            break;
-        }
-    }
-
-    if let Some((local_variable, local)) = local_variable {
+    if let Some((local_variable, local)) = ctx.scope()?.get_local(&ident) {
         if let Ok(local_variable) = u8::try_from(local_variable) {
-            let var_type = local.r#type.clone();
-            if var_type != Type::Unknown && var_type != expr_type {
-                panic!(
-                    "cant coerce between types!!! var ({:?}): {:?}, expr: {:?}",
-                    local.name, local.r#type, &expr_type
-                );
+            let var_type = ctx.resolve_type(local.r#type.clone());
+
+            match (member_key, &var_type) {
+                (None, _) => {
+                    if var_type != Type::Unknown && var_type != expr_type {
+                        panic!(
+                            "cant coerce between types!!! var ({:?}): {:?}, expr: {:?}",
+                            local.name, local.r#type, &expr_type
+                        );
+                    }
+                    expr_bytes.push(Op::Set as u8);
+                    expr_bytes.push(local_variable);
+                    return Ok((expr_bytes, expr_type));
+                }
+
+                (Some(Key::String(key)), Type::Struct { fields, .. }) => {
+                    let idx = fields.iter().position(|f| f.0 == key).unwrap();
+                    expr_bytes.push(Op::SetProperty as u8);
+                    expr_bytes.push(local_variable);
+                    expr_bytes.push(idx as u8);
+                    return Ok((expr_bytes, expr_type));
+                }
+
+                (Some(Key::Usize(idx)), Type::List(_)) => {
+                    expr_bytes.push(Op::SetProperty as u8);
+                    expr_bytes.push(local_variable);
+                    expr_bytes.push(idx as u8);
+                    return Ok((expr_bytes, expr_type));
+                }
+
+                _ => unreachable!(),
             }
-            expr_bytes.push(Op::Set as u8);
-            expr_bytes.push(local_variable);
-            return Ok((expr_bytes, expr_type));
         }
         unreachable!()
     } else if false
@@ -411,14 +454,8 @@ fn call(ctx: &mut Context, expr: &Box<Ast>, args: &Vec<Ast>) -> Result<(Vec<u8>,
             returns,
             mut generics,
         } => {
-            // If there is a surrounding function type context (like if this function is an argument to
-            // a surrounding function), we inherit its generics definitions where we dont make our own
-            if let Some(Type::Function {
-                generics: surrounding_generics,
-                ..
-            }) = &ctx.current_function_type
             {
-                for (k, v) in surrounding_generics.iter() {
+                for (k, v) in ctx.scope()?.generics.iter() {
                     generics.entry(k.to_string()).or_insert(v.clone());
                 }
             }
@@ -504,13 +541,9 @@ fn function(
 ) -> Result<(Vec<u8>, Type)> {
     // If there is a surrounding function type context (like if this function is an argument to
     // a surrounding function), we inherit its generics definitions where we dont make our own
-    if let Some(Type::Function {
-        generics: ref surrounding_generics,
-        ..
-    }) = ctx.current_function_type
     // TODO this can likely be put in the Scopes
     {
-        for (k, v) in surrounding_generics.iter() {
+        for (k, v) in ctx.scope()?.generics.iter() {
             generics.entry(k.to_string()).or_insert(v.clone());
         }
     }
@@ -519,7 +552,7 @@ fn function(
         args: args.iter().map(|a| a.1.clone()).collect(),
         returns: Box::new(returns.clone()),
         is_variadic: *is_variadic,
-        generics,
+        generics: generics.clone(),
     };
 
     let mut arity = args.len();
@@ -528,6 +561,7 @@ fn function(
     ctx.current_function_type = Some(ty.clone());
 
     let mut scope = Scope::default();
+    scope.generics = generics.clone();
 
     // If the parent expression is a struct declaration, that means this is a method and so should have
     // an implicit `self` variable injected
@@ -685,14 +719,46 @@ fn infix(ctx: &mut Context, a: &Box<Ast>, op: &Operator, b: &Box<Ast>) -> Result
 fn member(
     ctx: &mut Context,
     container: &Box<Ast>,
-    _key: &String,
+    key: &Key,
     _span: &Range<usize>,
 ) -> Result<(Vec<u8>, Type)> {
     // Put the containing object on the stack
     // NOTE: In the case of Enums, `bc` will be empty and we just care about `expr_type`.
-    let (bytecode, container_type) = compile(ctx, container)?;
-    dbg!(&container_type);
-    // deduce contents
+    let (mut bytecode, container_type) = compile(ctx, container)?;
+    match ctx.resolve_type(container_type.clone()) {
+        Type::Struct {
+            fields,  ..
+        } => {
+            for (idx, (name, ty)) in fields.iter().enumerate() {
+                if let Key::String(key) = key {
+                    if name == key {
+                        bytecode.push(Op::GetMember as u8);
+                        bytecode.push(idx as u8);
+                        return Ok((bytecode, ty.clone()));
+                    }
+                } else {
+                    panic!("cant use non string key for struct access");
+                }
+            }
+        }
+
+        Type::List(ty) => match key {
+            Key::Usize(idx) => {
+                bytecode.push(Op::GetMember as u8);
+                bytecode.push(*idx as u8);
+                return Ok((bytecode, *ty.clone()));
+            }
+            _ => todo!(),
+        },
+
+        // If
+        Type::Interface { name, .. } if name == "Index" => {
+            // Index interface is from the prelude and allows member access by arbitrary type
+            //let ()
+        }
+
+        x => todo!("{:?}", x),
+    }
 
     Ok((bytecode, Type::Unknown))
 }
@@ -770,30 +836,68 @@ fn decl_type(
     decl: &TypeDecl,
     _span: &Range<usize>,
 ) -> Result<(Vec<u8>, Type)> {
-    let ty = match decl {
+    match decl {
         TypeDecl::Enum {
             variants,
             generics: _,
-        } => Type::Enum(variants.clone()),
+        } => {
+            let ty = Type::Enum(variants.clone());
+            ctx.scope()?.types.insert(name.to_string(), ty.clone());
+            Ok((vec![], ty))
+        }
 
         TypeDecl::Struct {
             generics,
             fields,
-            methods,
+            methods: decl_methods,
         } => {
-            let mut methods_lookup = HashMap::default();
-            for (name, ast) in methods.iter() {
-                let (fn_bytecode, ty) = compile(ctx, ast)?;
-                let idx = ctx.cache_fn(fn_bytecode);
-                methods_lookup.insert(name.to_owned(), (ty, idx));
-            }
-
-            Type::Struct {
+            let ty = Type::Struct {
                 name: Some(name.to_string()),
                 fields: fields.clone(),
-                methods: methods_lookup,
+                methods: HashMap::default(),
                 generics: generics.clone(),
+            };
+
+            ctx.scope()?.types.insert(name.to_string(), ty.clone());
+
+            let mut scope = Scope::default();
+            scope.generics = generics.clone();
+            ctx.scopes.push(scope);
+
+            let mut compiled_methods = HashMap::default();
+            for (method_name, ast) in decl_methods.iter() {
+                let (fn_bytecode, ty) = compile(ctx, ast)?;
+                let idx = ctx.cache_fn(fn_bytecode);
+                compiled_methods.insert(method_name.to_owned(), (ty, idx));
+
+                if let Type::Struct {
+                    ref mut methods, ..
+                } = ctx
+                    .scope_by_index(ctx.scopes.len() - 2)?
+                    .types
+                    .get_mut(name)
+                    .unwrap()
+                {
+                    *methods = compiled_methods.clone();
+                }
             }
+
+            ctx.scopes.pop();
+
+            Ok((vec![], ctx.scope()?.types.get(name).unwrap().clone()))
+        }
+
+        TypeDecl::Interface {
+            generics,
+            properties,
+        } => {
+            let ty = Type::Interface {
+                name: name.to_string(),
+                properties: properties.clone(),
+                generics: generics.clone(),
+            };
+            ctx.scope()?.types.insert(name.to_string(), ty.clone());
+            Ok((vec![], ty))
         }
         // TypeDecl::Interface { properties } => Type::Interface {
         //     name: name.to_string(),
@@ -904,13 +1008,8 @@ fn decl_type(
         //         methods,
         //     }
         // }
-        _ => Type::Unknown,
-    };
-    ctx.scope()
-        .unwrap()
-        .types
-        .insert(name.to_string(), ty.clone());
-    Ok((vec![], ty))
+        _ => todo!(),
+    }
 }
 
 /// Creates a new local variable.
