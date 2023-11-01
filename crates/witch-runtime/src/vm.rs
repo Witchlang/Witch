@@ -129,6 +129,9 @@ pub struct Vm {
     heap: Heap,
     frames: Vec<CallFrame>,
 
+    /// The bytecode of the current callframe. Only used for lookups (next N bytes, etc..)
+    bytecode_cache: Vec<Vec<u8>>,
+
     /// Our function vtable. Struct methods go here.
     functions: Vec<Function>,
 
@@ -149,6 +152,7 @@ impl Vm {
             stack: Stack::new(),
             heap: Heap::default(),
             frames: vec![],
+            bytecode_cache: vec![],
             functions: vec![],
             upvalues: vec![],
             cache: vec![],
@@ -172,17 +176,17 @@ impl Vm {
 
     /// Retrieves the byte which the instruction pointer is currently pointing at.
     fn current_byte(&mut self) -> u8 {
-        self.deref_function(self.frame().ptr).bytecode[self.frame().ip]
+        self.bytecode_cache[self.bytecode_cache.len()-1][self.frame().ip]
     }
 
     /// Retrieves the byte which is after the byte that the instruction pointer is currently pointing at.
     fn next_byte(&mut self) -> u8 {
-        self.deref_function(self.frame().ptr).bytecode[self.frame().ip + 1]
+        self.bytecode_cache[self.bytecode_cache.len()-1][self.frame().ip + 1]
     }
 
     /// Retrieves the next 8 bytes from the current instruction pointer.
     fn next_eight_bytes(&mut self) -> [u8; 8] {
-        self.deref_function(self.frame().ptr).bytecode[self.frame().ip + 1..self.frame().ip + 1 + 8]
+        self.bytecode_cache[self.bytecode_cache.len()-1][self.frame().ip + 1..self.frame().ip + 1 + 8]
             .try_into()
             .unwrap()
     }
@@ -246,12 +250,14 @@ impl Vm {
     }
 
     pub fn push_callframe(&mut self, ptr: Pointer, offset: usize) {
-        if let Value::Function(f) = (self.to_value(Entry::Pointer(ptr))).borrow().clone() {
+        if let Value::Function(ref f) = &*(self.to_value(Entry::Pointer(ptr))).borrow() {
             let frame = CallFrame {
                 ip: 0,
                 stack_start: self.stack.len() - f.arity,
                 ptr,
             };
+
+            self.bytecode_cache.push(f.bytecode.clone());
 
             self.frame_mut().ip = self.frame().ip + offset; // One to advance the instruction pointer, plus one offset for the arg_len
             self.frames.push(frame);
@@ -266,6 +272,8 @@ impl Vm {
         if bytecode.is_empty() {
             return Ok(Value::Void);
         }
+
+        self.bytecode_cache.push(bytecode.clone());
 
         let ptr = self.heap.insert(Value::Function(Function {
             is_variadic: false,
@@ -323,8 +331,8 @@ impl Vm {
             // we implicitly return from the current call frame by popping self.frames.
             //
             // If there are no more frames left, we break the loop and move to the return down below.
-            if self.frame().ip > self.deref_function(self.frame().ptr).bytecode.len() - 1 {
-                if self.frames.pop().is_none()
+            if self.frame().ip > self.bytecode_cache[self.bytecode_cache.len()-1].len() - 1 {
+                if (self.frames.pop().is_none() && self.bytecode_cache.pop().is_none())
                     || (self.frames.len() > 1 && self.frames.len() - 1 < bottom_frame)
                 {
                     break;
@@ -384,7 +392,7 @@ impl Vm {
                     let value_length_bytes: [u8; 8] = self.next_eight_bytes();
                     let value_length = usize::from_ne_bytes(value_length_bytes);
                     let ip = self.frame().ip;
-                    let value_bytes = &self.deref_function(self.frame().ptr).bytecode
+                    let value_bytes = &self.bytecode_cache[self.bytecode_cache.len()-1]
                         [(ip + 9)..(ip + 9 + value_length)];
 
                     let (mut value, _): (Value, usize) =
@@ -578,6 +586,7 @@ impl Vm {
                 // and puts the return value on top of it.
                 Op::Return => {
                     let frame = self.frames.pop().unwrap();
+                    self.bytecode_cache.pop();
 
                     self.close_upvalues(frame);
 

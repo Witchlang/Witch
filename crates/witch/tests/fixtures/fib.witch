@@ -6,4 +6,4 @@ function fib (n: usize) -> usize {
     }
 }
 
-fib(10)
+fib(30)
