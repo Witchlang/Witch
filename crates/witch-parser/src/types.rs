@@ -295,7 +295,15 @@ impl PartialEq for Type {
 impl Hash for Type {
     fn hash<H: Hasher>(&self, state: &mut H) {
         // TODO recursively do this for function types.
-        discriminant(self).hash(state)
+        match self {
+            Type::TypeVar { name, inner } => {
+                name.hash(state);
+                for i in inner {
+                    i.hash(state);
+                }
+            }
+            _ => discriminant(self).hash(state),
+        }
     }
 }
 

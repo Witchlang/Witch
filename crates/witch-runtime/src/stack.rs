@@ -1,5 +1,3 @@
-
-
 use alloc::vec;
 use alloc::vec::Vec;
 
@@ -17,8 +15,20 @@ pub enum Entry {
     Bool(bool),
     Pointer(Pointer),
 
+    /// Points an index in Vm::functions
+    VtablePointer(usize),
+
     /// A pointer to a value inside another value on the heap
     OffsetPointer(Pointer, usize),
+}
+
+impl Entry {
+    pub fn as_heap_pointer(self) -> Pointer {
+        match self {
+            Entry::Pointer(p) => p,
+            _ => unreachable!(),
+        }
+    }
 }
 
 impl From<Entry> for Value {

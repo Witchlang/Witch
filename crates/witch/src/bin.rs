@@ -1,11 +1,7 @@
 use std::env;
 
-
-
 use std::path::PathBuf;
 use std::process;
-
-
 
 pub use witch_compiler::compile;
 pub use witch_runtime::vm::Vm;

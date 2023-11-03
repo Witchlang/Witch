@@ -328,7 +328,6 @@ pub fn compile<'a>(ctx: &mut Context, ast: &Ast) -> Result<(Vec<u8>, Type)> {
 
 /// Assigns a local variable by setting its new value without initializing it.
 /// It needs to either be mutable or the parent expr needs to be `Ast::Let`.
-/// TODO: assign to list items, e.g. let x = [1, 2, 3]; x[2] = 4
 fn assignment(
     ctx: &mut Context,
     lhs: &Box<Ast>,
@@ -426,7 +425,10 @@ fn call(ctx: &mut Context, expr: &Box<Ast>, args: &Vec<Ast>) -> Result<(Vec<u8>,
         args_with_types.push((arg.clone(), arg_type));
     }
 
+    dbg!(&expr);
     let (mut bc, mut called_type) = compile(ctx, expr)?;
+
+    dbg!(&called_type);
 
     // This handles the recursion edge case. When we're calling a function recursively, it's not actually bound to the
     // variable name at the time of compiling the function body, so the variable we're calling is undefined at this point.
@@ -520,7 +522,9 @@ fn call(ctx: &mut Context, expr: &Box<Ast>, args: &Vec<Ast>) -> Result<(Vec<u8>,
             bytecode.push(Op::Call as u8);
             bytecode.push(u8::try_from(args.len()).unwrap());
 
+            dbg!(&bindings, &returns);
             let return_type = bindings.remove(&*(returns.clone())).unwrap_or(*returns);
+            dbg!(&return_type);
             Ok((bytecode, return_type))
         }
         _ => {
@@ -725,20 +729,31 @@ fn member(
     // Put the containing object on the stack
     // NOTE: In the case of Enums, `bc` will be empty and we just care about `expr_type`.
     let (mut bytecode, container_type) = compile(ctx, container)?;
+    dbg!(&container_type, &key);
     match ctx.resolve_type(container_type.clone()) {
         Type::Struct {
-            fields,  ..
+            fields, methods, ..
         } => {
-            for (idx, (name, ty)) in fields.iter().enumerate() {
-                if let Key::String(key) = key {
+            if let Key::String(key) = key {
+                for (idx, (name, ty)) in fields.iter().enumerate() {
                     if name == key {
                         bytecode.push(Op::GetMember as u8);
                         bytecode.push(idx as u8);
                         return Ok((bytecode, ty.clone()));
                     }
-                } else {
-                    panic!("cant use non string key for struct access");
                 }
+
+                for (name, (ty, idx)) in methods.iter() {
+                    if name == key {
+                        bytecode.push(Op::GetFunction as u8);
+                        bytecode.push(*idx as u8);
+                        return Ok((bytecode, ty.clone()));
+                    }
+                }
+
+                panic!("invalid struct field or method: {}", key)
+            } else {
+                panic!("cant use non string key for struct access");
             }
         }
 
@@ -748,7 +763,7 @@ fn member(
                 bytecode.push(*idx as u8);
                 return Ok((bytecode, *ty.clone()));
             }
-            _ => todo!(),
+            x => todo!("{:?}", x),
         },
 
         // If
@@ -796,11 +811,12 @@ fn statement(
 fn struct_literal(
     ctx: &mut Context,
     ident: &Option<String>,
-    _fields: &HashMap<String, Ast>,
+    fields: &HashMap<String, Ast>,
     _span: &Range<usize>,
 ) -> Result<(Vec<u8>, Type)> {
+    let mut bytecode = vec![];
     let mut return_type = Type::Unknown;
-    let mut field_types = None;
+    let mut field_types = vec![];
 
     // if named, look up the type and get vtable entries for the methods
     if let Some(name) = ident {
@@ -813,7 +829,7 @@ fn struct_literal(
             .clone()
         {
             return_type = struct_type.clone();
-            field_types = Some(fields);
+            field_types = fields.to_vec();
         } else {
             panic!(
                 "struct of name {} is not defined at this point or is of the wrong type",
@@ -821,11 +837,22 @@ fn struct_literal(
             );
         }
     }
-    // put fields on the stack
-    // put method pointers on the stack
-    // emit collect list bytecode
 
-    Ok((vec![], Type::Unknown))
+    for (name, field_ty) in field_types.iter() {
+        let (mut bc, field_content_ty) = compile(ctx, fields.get(name).unwrap())?;
+        if field_ty != &field_content_ty {
+            panic!(
+                "type error: field {} expected type {:?}, got {:?}",
+                name, field_ty, field_content_ty
+            );
+        }
+        bytecode.append(&mut bc);
+    }
+
+    bytecode.push(Op::Collect as u8);
+    let length: [u8; std::mem::size_of::<usize>()] = fields.len().to_ne_bytes();
+    bytecode.append(&mut length.to_vec());
+    Ok((bytecode, return_type))
 }
 
 /// Declares a new type for the current scope. The type itself does not emit any bytecode,

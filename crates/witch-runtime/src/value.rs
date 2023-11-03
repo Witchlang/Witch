@@ -1,8 +1,6 @@
 use alloc::{string::String, vec, vec::Vec};
 use serde::{Deserialize, Serialize};
 
-
-
 #[derive(Serialize, Debug, Deserialize, PartialEq, Clone)]
 #[repr(C, u8)]
 pub enum Value {

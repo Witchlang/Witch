@@ -1,6 +1,6 @@
 use crate::types::Type;
 use crate::{ast::Key, error::Result};
-use std::{collections::HashMap};
+use std::collections::HashMap;
 use witch_runtime::value::Value;
 
 use super::{

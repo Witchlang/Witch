@@ -1,5 +1,5 @@
 use alloc::rc::Rc;
-use core::{cell::RefCell};
+use core::cell::RefCell;
 use slab::Slab;
 
 use crate::value::Value;
