@@ -1,6 +1,6 @@
 let greeting = "Hello"
 
-function id [T](n: T) -> T {
+function id [T](n: T) -> T where T: usize {
    return n
 }
 

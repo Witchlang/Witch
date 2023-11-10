@@ -4,6 +4,7 @@
 #![feature(type_alias_impl_trait)]
 #![feature(iter_advance_by)]
 #![feature(assert_matches)]
+#![feature(let_chains)]
 use std::iter::Peekable;
 
 use logos::Span;

@@ -5,11 +5,3 @@ let x = iter(list)
 x.next()
 x.next()
 x.next()
-x.next()
-x.next()
-x.next()
-x.next()
-x.next()
-x
-
-x.data[4]

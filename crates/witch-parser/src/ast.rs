@@ -116,7 +116,7 @@ pub enum Ast {
         args: Vec<(String, Type)>,
         returns: Type,
         body: Box<Self>,
-        generics: HashMap<String, Type>,
+        generics: Vec<(String, Type)>,
     },
 
     // A value expression.

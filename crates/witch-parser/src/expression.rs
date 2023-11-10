@@ -291,6 +291,7 @@ fn function_call<'input>(p: &mut Parser<'input, Lexer<'input>>, expr: Box<Ast>) 
 }
 
 pub fn function_expression<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<Ast> {
+    let mut generics = vec![];
     // Possibly type variables
     // [T, U]
     let type_vars = if let Some(Kind::LSquare) = p.peek() {
@@ -313,16 +314,6 @@ pub fn function_expression<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Res
     }
     p.consume(&Kind::RParen)?;
 
-    let constraints = where_constraints(p)?;
-
-    let mut generics = HashMap::default();
-    for v in type_vars.into_iter() {
-        generics.insert(v, Type::Any);
-    }
-    for (k, v) in constraints.into_iter() {
-        generics.entry(k).and_modify(|e| *e = v);
-    }
-
     p.consume(&Kind::Arrow)?;
 
     // After the arrow, a function declaration can take a couple of forms:
@@ -333,13 +324,6 @@ pub fn function_expression<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Res
     let maybe_type_literal = type_literal(&mut fork);
 
     let (returns, body) = match maybe_type_literal {
-        Ok(ty) if fork.at(Kind::LBrace) => {
-            *p = fork;
-            p.consume(&Kind::LBrace)?;
-            let body = statement(p)?;
-            p.consume(&Kind::RBrace)?;
-            (ty, body)
-        }
         Ok(ty) if fork.at(Kind::Colon) => {
             *p = fork;
             p.consume(&Kind::Colon)?;
@@ -352,6 +336,22 @@ pub fn function_expression<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Res
                     span: start..p.cursor,
                 },
             )
+        }
+        Ok(ty) => {
+            *p = fork;
+
+            let constraints = where_constraints(p)?;
+            for v in type_vars.into_iter() {
+                generics.push((
+                    v.clone(),
+                    constraints.get(&v).unwrap_or(&Type::Any).to_owned(),
+                ));
+            }
+
+            p.consume(&Kind::LBrace)?;
+            let body = statement(p)?;
+            p.consume(&Kind::RBrace)?;
+            (ty, body)
         }
         _ => {
             let start = p.cursor;

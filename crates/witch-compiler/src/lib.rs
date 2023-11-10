@@ -7,6 +7,8 @@
 #![feature(type_alias_impl_trait)]
 #![feature(iter_advance_by)]
 #![feature(assert_matches)]
+#![feature(let_chains)]
+#![feature(map_try_insert)]
 
 use anyhow::Context as AContext;
 use anyhow::Result;
@@ -44,7 +46,7 @@ pub fn compile(file_path: PathBuf, maybe_ctx: Option<Context>) -> Result<(Vec<u8
 /// Canonicalizes a file path from our `start_path`, returning the new path as well as the file contents.
 fn resolve_file(start_path: Option<PathBuf>, file_path: PathBuf) -> Result<(PathBuf, String)> {
     let file_path = if let Some(start_path) = start_path {
-        let cwd = current_dir().with_context(|| format!("Failed to get current directory"))?;
+        let cwd = current_dir().with_context(|| "Failed to get current directory".to_string())?;
         let p = cwd
             .as_path()
             .join(Path::new(&start_path).parent().unwrap())
@@ -56,7 +58,7 @@ fn resolve_file(start_path: Option<PathBuf>, file_path: PathBuf) -> Result<(Path
             )
         })?
     } else {
-        let cwd = current_dir().with_context(|| format!("Failed to get current directory"))?;
+        let cwd = current_dir().with_context(|| "Failed to get current directory".to_string())?;
         let p = cwd.as_path().join(file_path.clone());
         std::fs::canonicalize(p).with_context(|| {
             format!(

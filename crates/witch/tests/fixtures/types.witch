@@ -1,0 +1,11 @@
+struct Foo[T] {
+    
+    field: T
+
+    function method() -> T {
+        return self.field
+    }
+}
+
+let x: Foo[usize] = new Foo { field: 3 }
+x.method()

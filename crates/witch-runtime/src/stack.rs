@@ -1,3 +1,4 @@
+
 use alloc::vec;
 use alloc::vec::Vec;
 
@@ -5,7 +6,10 @@ use crate::value::Value;
 
 /// Pointer is a usize referring to a Value on the heap
 #[derive(Copy, Clone, Debug, PartialEq)]
-pub struct Pointer(pub usize);
+pub enum Pointer {
+    Heap(usize),
+    Vtable(usize),
+}
 
 #[derive(Copy, Clone, Debug)]
 pub enum Entry {
@@ -14,12 +18,6 @@ pub enum Entry {
     Usize(usize),
     Bool(bool),
     Pointer(Pointer),
-
-    /// Points an index in Vm::functions
-    VtablePointer(usize),
-
-    /// A pointer to a value inside another value on the heap
-    OffsetPointer(Pointer, usize),
 }
 
 impl Entry {

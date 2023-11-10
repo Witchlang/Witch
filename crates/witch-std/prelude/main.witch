@@ -1,25 +1,17 @@
-interface Index[Idx, Output] {
-    index: (Idx) -> Output
-}
-
-struct Iterator[T, E, O] where T: Index[E, O] {
+struct Iterator[T] {
     
     # Holds the current index for the iterable
     # TODO: Generic over the indexable type, such as keys for maps etc
     cursor: usize
 
     # The data we are iterating over
-    data: T
+    data: List[T]
     
-    function next() -> O {
+    function next() -> usize {
         let value = self.data[self.cursor]
         self.cursor = self.cursor + 1
         return value
     }
-}
-
-interface IntoIterator[T] {
-    iter: () -> Iterator[T]
 }
 
 function iter[T](data: T) -> Iterator[T] {

@@ -1,5 +1,6 @@
 //! The compiler module takes an AST representation of our program and
 //! emits bytecode from it.
+mod type_system;
 mod util;
 use std::collections::HashMap;
 use std::ops::Range;
@@ -9,6 +10,8 @@ use witch_parser::ast::{Ast, Key, Operator};
 use witch_parser::types::{Type, TypeDecl};
 use witch_runtime::value::{Function, Value};
 use witch_runtime::vm::Op;
+
+use self::type_system::TypeSystem;
 
 #[derive(Debug, Clone)]
 pub struct Upvalue {
@@ -32,6 +35,9 @@ pub struct LocalVariable {
 pub struct Scope {
     pub locals: Vec<LocalVariable>,
     pub types: HashMap<String, Type>,
+
+    /// A stack of bindings of concrete types to type variable names
+    pub bindings: Vec<HashMap<Type, Type>>,
     /// Generic constraints for this scope, if any
     pub generics: HashMap<String, Type>,
     pub upvalues: Vec<Upvalue>,
@@ -71,6 +77,10 @@ pub struct Cached {
 
 #[derive(Debug, Clone)]
 pub struct Context {
+    /// Holds the type system
+    pub ts: TypeSystem,
+
+    /// Scopes map to callframes at runtime
     pub scopes: Vec<Scope>,
 
     /// Lineage is a straight line of parent relationships from the current
@@ -92,6 +102,7 @@ pub struct Context {
 impl Default for Context {
     fn default() -> Self {
         Self {
+            ts: TypeSystem::new(),
             scopes: vec![Scope::default()],
             lineage: Default::default(),
             current_function_type: None,
@@ -112,44 +123,25 @@ impl Context {
         self.scopes.get_mut(scope_idx).ok_or(Error::fatal())
     }
 
-    /// Ensures that a type is not a Type::Typevar, instead it resolves it to either a
-    /// generic constraint or a custom type.
-    pub fn resolve_type(&self, ty: Type) -> Type {
-        if !matches!(ty, Type::TypeVar { .. }) {
-            return ty;
+    pub fn get_type(&self, name: &str) -> Type {
+        self.ts.get_type(name).unwrap()
+    }
+
+    /// Adds a type to the type system. May only be done in the root/global scope!
+    pub fn add_type(&mut self, name: String, typ: Type) -> Result<()> {
+        if self.scopes.len() > 1 {
+            dbg!("attempted to add type in non-root scope");
+            return Err(Error::fatal());
         }
+        self.ts.add_type(name, typ)
+    }
 
-        match ty {
-            Type::TypeVar { name, inner } => {
-                // Start with the current scope and walk upwards.
-                for scope in self.scopes.iter().rev() {
-                    if scope.generics.contains_key(&name) {
-                        let mut ty = self.resolve_type(scope.generics.get(&name).unwrap().clone());
+    pub fn push_type_scope(&mut self, subs: &Vec<(String, Type)>) {
+        self.ts.push_scope(subs.clone().into_iter().collect())
+    }
 
-                        match ty {
-                            Type::Interface {
-                                ref mut generics, ..
-                            } => {
-                                // type check generics against inner types, if any, and then replace the constraints
-                                for (idx, i) in inner.into_iter().enumerate() {
-                                    if generics[idx].1 == i {
-                                        generics[idx].1 = i;
-                                    }
-                                }
-                            }
-                            _ => {}
-                        }
-                        return ty;
-                    }
-
-                    if scope.types.contains_key(&name) {
-                        return scope.types.get(&name).unwrap().clone();
-                    }
-                }
-                Type::Unknown
-            }
-            ty => ty,
-        }
+    pub fn pop_type_scope(&mut self) {
+        self.ts.pop_scope()
     }
 
     /// For non-local variables, we recursively walk upwards from our current scope until we find it.
@@ -271,6 +263,14 @@ impl Context {
             self.functions_cache.len() - 1
         }
     }
+
+    /// Replaces the bytecode at index `idx` within the functions cache.
+    pub fn cache_fn_at(&mut self, idx: usize, fn_bytecode: Vec<u8>) {
+        self.functions_cache[idx] = Cached {
+            bytecode: fn_bytecode,
+            flushed: false,
+        };
+    }
 }
 
 /// Turns an AST into bytecode
@@ -290,7 +290,7 @@ pub fn compile<'a>(ctx: &mut Context, ast: &Ast) -> Result<(Vec<u8>, Type)> {
             returns,
             body,
             generics,
-        } => function(ctx, is_variadic, args, returns, body, generics.clone())?,
+        } => function(ctx, is_variadic, args, returns, body, generics)?,
         Ast::If {
             predicate,
             then_,
@@ -323,7 +323,8 @@ pub fn compile<'a>(ctx: &mut Context, ast: &Ast) -> Result<(Vec<u8>, Type)> {
         x => todo!("{:?}", x),
     };
 
-    Ok((bytecode, return_type))
+    // For each compilation step, we try to resolve the return type to be as concrete as possible
+    Ok((bytecode, ctx.ts.resolve(return_type)?))
 }
 
 /// Assigns a local variable by setting its new value without initializing it.
@@ -351,14 +352,14 @@ fn assignment(
 
     if let Some((local_variable, local)) = ctx.scope()?.get_local(&ident) {
         if let Ok(local_variable) = u8::try_from(local_variable) {
-            let var_type = ctx.resolve_type(local.r#type.clone());
+            let var_type = ctx.ts.resolve(local.r#type.clone())?;
 
             match (member_key, &var_type) {
                 (None, _) => {
                     if var_type != Type::Unknown && var_type != expr_type {
                         panic!(
-                            "cant coerce between types!!! var ({:?}): {:?}, expr: {:?}",
-                            local.name, local.r#type, &expr_type
+                            "cant coerce between types!!! var ({:?}): {:?}, expr_type: {:?}",
+                            local.name, var_type, &expr_type
                         );
                     }
                     expr_bytes.push(Op::Set as u8);
@@ -425,10 +426,7 @@ fn call(ctx: &mut Context, expr: &Box<Ast>, args: &Vec<Ast>) -> Result<(Vec<u8>,
         args_with_types.push((arg.clone(), arg_type));
     }
 
-    dbg!(&expr);
     let (mut bc, mut called_type) = compile(ctx, expr)?;
-
-    dbg!(&called_type);
 
     // This handles the recursion edge case. When we're calling a function recursively, it's not actually bound to the
     // variable name at the time of compiling the function body, so the variable we're calling is undefined at this point.
@@ -454,13 +452,15 @@ fn call(ctx: &mut Context, expr: &Box<Ast>, args: &Vec<Ast>) -> Result<(Vec<u8>,
             args: arg_types,
             is_variadic,
             returns,
-            mut generics,
+            generics,
         } => {
-            {
-                for (k, v) in ctx.scope()?.generics.iter() {
-                    generics.entry(k.to_string()).or_insert(v.clone());
-                }
-            }
+            // {
+            //     for (k, v) in ctx.scope()?.generics.iter() {
+            //         generics.entry(k.to_string()).or_insert(v.clone());
+            //     }
+            // }
+
+            ctx.push_type_scope(&generics);
 
             // Compare arguments length against the type.
             // If the type is not variadic, they len's should be the same.
@@ -489,32 +489,51 @@ fn call(ctx: &mut Context, expr: &Box<Ast>, args: &Vec<Ast>) -> Result<(Vec<u8>,
                 }
             }
 
+            //ctx.scope()?.bindings.push(HashMap::default());
             // Type check arguments and update the `bindings` map with what our generics correspond to for this call
-            let mut bindings = HashMap::new();
             for (idx, wanted_type) in arg_types.into_iter().enumerate() {
                 let supplied_type = args_with_types[idx].1.clone();
 
                 // If wanted type is a variable type, check if its supplied in the function's generics constraints.
                 // If it is, compare it against the supplied type and update the bindings table.
                 // If it isn't, resolve it to an actual type and compare it against the supplied one.
-                match wanted_type {
-                    ref wanted @ Type::TypeVar { ref name, .. } => {
-                        if let Some(constraint) = generics.get(name) {
-                            if &supplied_type == constraint {
-                                bindings.insert(wanted.clone(), supplied_type);
-                            }
-                        } else {
-                            let ty = ctx.resolve_type(wanted.clone());
-                            if ty != supplied_type {
-                                return Err(Error::fatal()); //todo
-                            }
-                        }
-                    }
-                    wanted => {
-                        if wanted != supplied_type {
-                            return Err(Error::fatal()); //todo
-                        }
-                    }
+                // match wanted_type {
+                //     ref wanted @ Type::TypeVar { ref name, .. } => {
+                //         if let Some(constraint) = generics.get(name) {
+                //             if supplied_type == ctx.ts.resolve(constraint.clone()) {
+                //                 bindings.insert(wanted.clone(), supplied_type);
+                //             } else {
+                //                 dbg!( &supplied_type, &constraint, ctx.ts.resolve(constraint.clone()));
+                //                 panic!("poop");
+                //             }
+                //         } else {
+                //             let ty = ctx.ts.resolve(wanted.clone());
+                //             if ty != supplied_type {
+                //                 return Err(Error::fatal()); //todo
+                //             }
+                //         }
+                //     }
+                //     wanted => {
+                //         if wanted != supplied_type {
+                //             return Err(Error::fatal()); //todo
+                //         }
+                //     }
+                // }
+
+                let resolved_wanted_type = ctx.ts.resolve(wanted_type.clone())?; // ctx.ts.resolve_recursive(wanted_type.clone(), vec![generics.clone()]);
+
+                if resolved_wanted_type != supplied_type {
+                    panic!(
+                        "type error in function call, wanted: {:?}, got: {:?}",
+                        wanted_type, supplied_type
+                    );
+                }
+
+                if resolved_wanted_type.requires_binding() {
+                    ctx.scope()?
+                        .bindings
+                        .last_mut()
+                        .map(|m| m.insert(resolved_wanted_type, supplied_type.clone()));
                 }
             }
 
@@ -522,10 +541,9 @@ fn call(ctx: &mut Context, expr: &Box<Ast>, args: &Vec<Ast>) -> Result<(Vec<u8>,
             bytecode.push(Op::Call as u8);
             bytecode.push(u8::try_from(args.len()).unwrap());
 
-            dbg!(&bindings, &returns);
-            let return_type = bindings.remove(&*(returns.clone())).unwrap_or(*returns);
-            dbg!(&return_type);
-            Ok((bytecode, return_type))
+            let return_type = ctx.ts.resolve(*returns)?; //ctx.scope()?.bindings.last().unwrap().get(&*(returns.clone())).unwrap_or(&returns);
+            ctx.pop_type_scope();
+            Ok((bytecode, return_type.clone()))
         }
         _ => {
             dbg!(called_type);
@@ -541,16 +559,17 @@ fn function(
     args: &Vec<(String, Type)>,
     returns: &Type,
     body: &Box<Ast>,
-    mut generics: HashMap<String, Type>,
+    generics: &Vec<(String, Type)>,
 ) -> Result<(Vec<u8>, Type)> {
     // If there is a surrounding function type context (like if this function is an argument to
     // a surrounding function), we inherit its generics definitions where we dont make our own
     // TODO this can likely be put in the Scopes
-    {
-        for (k, v) in ctx.scope()?.generics.iter() {
-            generics.entry(k.to_string()).or_insert(v.clone());
-        }
-    }
+    // {
+    //     for (k, v) in ctx.scope()?.generics.iter() {
+    //         generics.entry(k.to_string()).or_insert(v.clone());
+    //     }
+    // }
+    ctx.push_type_scope(generics);
 
     let ty = Type::Function {
         args: args.iter().map(|a| a.1.clone()).collect(),
@@ -565,7 +584,7 @@ fn function(
     ctx.current_function_type = Some(ty.clone());
 
     let mut scope = Scope::default();
-    scope.generics = generics.clone();
+    // scope.generics = generics.clone();
 
     // If the parent expression is a struct declaration, that means this is a method and so should have
     // an implicit `self` variable injected
@@ -581,10 +600,7 @@ fn function(
             name: "self".to_string(),
             is_captured: false,
             is_mutable: false,
-            r#type: Type::TypeVar {
-                name: name.clone(),
-                inner: vec![],
-            },
+            r#type: Type::TypeVar(name.clone()),
         })
     }
 
@@ -729,15 +745,21 @@ fn member(
     // Put the containing object on the stack
     // NOTE: In the case of Enums, `bc` will be empty and we just care about `expr_type`.
     let (mut bytecode, container_type) = compile(ctx, container)?;
-    dbg!(&container_type, &key);
-    match ctx.resolve_type(container_type.clone()) {
+
+    match ctx.ts.resolve(container_type.clone())? {
         Type::Struct {
             fields, methods, ..
         } => {
             if let Key::String(key) = key {
                 for (idx, (name, ty)) in fields.iter().enumerate() {
+                    if name == "cursor" {
+                        dbg!(idx as u8, &key);
+                    } else {
+                        dbg!(&name, &idx);
+                    }
                     if name == key {
                         bytecode.push(Op::GetMember as u8);
+                        bytecode.push(1_u8);
                         bytecode.push(idx as u8);
                         return Ok((bytecode, ty.clone()));
                     }
@@ -760,20 +782,38 @@ fn member(
         Type::List(ty) => match key {
             Key::Usize(idx) => {
                 bytecode.push(Op::GetMember as u8);
+                bytecode.push(1_u8);
                 bytecode.push(*idx as u8);
                 return Ok((bytecode, *ty.clone()));
+            }
+            Key::Expression(expr) => {
+                let (mut key_bytecode, key_type) = compile(ctx, expr)?;
+                dbg!(&expr);
+                if key_type != Type::Usize {
+                    panic!("lists can only be indexed by usize");
+                }
+                bytecode.append(&mut key_bytecode);
+                bytecode.push(Op::GetMember as u8);
+                bytecode.push(0_u8);
+                return Ok((bytecode, Type::Unknown));
             }
             x => todo!("{:?}", x),
         },
 
-        // If
-        Type::Interface { name, .. } if name == "Index" => {
-            // Index interface is from the prelude and allows member access by arbitrary type
-            //let ()
-        }
-
+        // TODO this can probably be handled in a nicer way than being hardcoded here...
+        Type::Interface { name, .. } if name == "Index" => match key {
+            Key::Expression(expr) => {
+                let (mut key_bytecode, _key_type) = compile(ctx, expr)?;
+                bytecode.push(Op::GetMember as u8);
+                bytecode.append(&mut key_bytecode);
+                return Ok((bytecode, Type::Unknown));
+            }
+            x => todo!("{:?}", x),
+        },
         x => todo!("{:?}", x),
     }
+
+    panic!("what");
 
     Ok((bytecode, Type::Unknown))
 }
@@ -815,21 +855,23 @@ fn struct_literal(
     _span: &Range<usize>,
 ) -> Result<(Vec<u8>, Type)> {
     let mut bytecode = vec![];
-    let mut return_type = Type::Unknown;
     let mut field_types = vec![];
+    let mut methods: HashMap<String, (Type, usize)> = HashMap::default();
+    let mut generics = vec![];
 
-    // if named, look up the type and get vtable entries for the methods
+    // if named, look up the type and field types
     if let Some(name) = ident {
         // This is a named struct. make sure the type is defined
-        if let ref struct_type @ Type::Struct { ref fields, .. } = ctx
-            .resolve_type(Type::TypeVar {
-                name: name.to_string(),
-                inner: vec![],
-            })
-            .clone()
+        if let Type::Struct {
+            ref fields,
+            generics: ref g,
+            methods: ref m,
+            ..
+        } = ctx.get_type(name)
         {
-            return_type = struct_type.clone();
-            field_types = fields.to_vec();
+            field_types = fields.clone();
+            methods = m.clone();
+            generics = g.clone();
         } else {
             panic!(
                 "struct of name {} is not defined at this point or is of the wrong type",
@@ -838,16 +880,45 @@ fn struct_literal(
         }
     }
 
-    for (name, field_ty) in field_types.iter() {
-        let (mut bc, field_content_ty) = compile(ctx, fields.get(name).unwrap())?;
-        if field_ty != &field_content_ty {
+    ctx.push_type_scope(&generics);
+
+    let mut substitutions = vec![];
+    for (name, field_ty) in field_types.iter_mut() {
+        let (mut bc, actual_field_type) = compile(ctx, fields.get(name).unwrap())?;
+
+        if ctx.ts.resolve(field_ty.clone())? != actual_field_type {
             panic!(
                 "type error: field {} expected type {:?}, got {:?}",
-                name, field_ty, field_content_ty
+                name, field_ty, actual_field_type
             );
         }
+        if let Type::TypeVar(ident) = field_ty.clone() {
+            substitutions.push((ident, actual_field_type.clone()));
+        }
+
         bytecode.append(&mut bc);
     }
+
+    ctx.push_type_scope(&substitutions);
+
+    let field_types = field_types
+        .into_iter()
+        .map(|(n, t)| (n, ctx.ts.resolve(t).unwrap()))
+        .collect();
+    let methods = methods
+        .into_iter()
+        .map(|(n, (t, idx))| (n, (ctx.ts.resolve(t).unwrap(), idx)))
+        .collect();
+
+    ctx.pop_type_scope();
+    ctx.pop_type_scope();
+
+    let return_type = Type::Struct {
+        name: ident.clone(),
+        fields: field_types,
+        methods,
+        generics,
+    };
 
     bytecode.push(Op::Collect as u8);
     let length: [u8; std::mem::size_of::<usize>()] = fields.len().to_ne_bytes();
@@ -855,7 +926,7 @@ fn struct_literal(
     Ok((bytecode, return_type))
 }
 
-/// Declares a new type for the current scope. The type itself does not emit any bytecode,
+/// Declares a new type. The type itself does not emit any bytecode,
 /// but struct methods get inserted into our function vtable, which get emitted post compilation.
 fn decl_type(
     ctx: &mut Context,
@@ -868,63 +939,65 @@ fn decl_type(
             variants,
             generics: _,
         } => {
-            let ty = Type::Enum(variants.clone());
-            ctx.scope()?.types.insert(name.to_string(), ty.clone());
-            Ok((vec![], ty))
+            let typ = Type::Enum(variants.clone());
+            ctx.add_type(name.to_string(), typ.clone())?;
+            ctx.scope()?.types.insert(name.to_string(), typ.clone());
+            Ok((vec![], typ))
         }
 
         TypeDecl::Struct {
             generics,
             fields,
-            methods: decl_methods,
+            methods,
         } => {
-            let ty = Type::Struct {
+            ctx.push_type_scope(generics);
+
+            let mut method_vtable_idxs: HashMap<String, usize> = HashMap::default();
+            let typ = Type::Struct {
                 name: Some(name.to_string()),
                 fields: fields.clone(),
-                methods: HashMap::default(),
+                methods: methods
+                    .iter()
+                    .map(|(name, ast)| {
+                        // Reserve an index in the vtable with empty bytecode
+                        let vtable_idx = ctx.cache_fn(vec![]);
+                        method_vtable_idxs.insert(name.clone(), vtable_idx);
+
+                        (name.clone(), (ast.into(), vtable_idx))
+                    })
+                    .collect(),
                 generics: generics.clone(),
             };
 
-            ctx.scope()?.types.insert(name.to_string(), ty.clone());
+            ctx.add_type(name.to_string(), typ.clone())?;
 
-            let mut scope = Scope::default();
-            scope.generics = generics.clone();
-            ctx.scopes.push(scope);
-
-            let mut compiled_methods = HashMap::default();
-            for (method_name, ast) in decl_methods.iter() {
+            for (method_name, ast) in methods.iter() {
                 let (fn_bytecode, ty) = compile(ctx, ast)?;
-                let idx = ctx.cache_fn(fn_bytecode);
-                compiled_methods.insert(method_name.to_owned(), (ty, idx));
 
-                if let Type::Struct {
-                    ref mut methods, ..
-                } = ctx
-                    .scope_by_index(ctx.scopes.len() - 2)?
-                    .types
-                    .get_mut(name)
-                    .unwrap()
-                {
-                    *methods = compiled_methods.clone();
+                if Type::from(ast) != ty {
+                    panic!("compiled method to different type than ast???");
                 }
+
+                ctx.cache_fn_at(*method_vtable_idxs.get(method_name).unwrap(), fn_bytecode);
             }
 
-            ctx.scopes.pop();
+            ctx.pop_type_scope();
 
-            Ok((vec![], ctx.scope()?.types.get(name).unwrap().clone()))
+            Ok((vec![], typ))
         }
 
         TypeDecl::Interface {
             generics,
             properties,
         } => {
-            let ty = Type::Interface {
+            let typ = Type::Interface {
                 name: name.to_string(),
                 properties: properties.clone(),
                 generics: generics.clone(),
             };
-            ctx.scope()?.types.insert(name.to_string(), ty.clone());
-            Ok((vec![], ty))
+            ctx.add_type(name.to_string(), typ.clone())?;
+            ctx.scope()?.types.insert(name.to_string(), typ.clone());
+            Ok((vec![], typ))
         }
         // TypeDecl::Interface { properties } => Type::Interface {
         //     name: name.to_string(),
@@ -1063,18 +1136,18 @@ fn let_(
 
     // If the original type is Unknown, update the local var with the assignment type
     // If it isn't, conduct a type check.
-    match ty {
+    match ctx.ts.resolve(ty)? {
         Type::Unknown => {
             let locals = &mut ctx.scope()?.locals;
             locals.last_mut().unwrap().r#type = assignment_type.clone();
         }
-        _ if ty != assignment_type => {
+        ty if ty != assignment_type => {
             panic!(
                 "attempted to assign value of type {:?} to a variable of type {:?}",
                 assignment_type, ty
             );
         }
-        _ => {
+        ty => {
             assignment_type = ty;
         }
     }

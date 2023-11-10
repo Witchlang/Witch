@@ -184,6 +184,13 @@ impl Vm {
         self.bytecode_cache[self.bytecode_cache.len() - 1][self.frame().ip + 1]
     }
 
+    fn next_two_bytes(&mut self) -> [u8; 2] {
+        [
+            self.bytecode_cache[self.bytecode_cache.len() - 1][self.frame().ip + 1],
+            self.bytecode_cache[self.bytecode_cache.len() - 1][self.frame().ip + 2],
+        ]
+    }
+
     /// Retrieves the next 8 bytes from the current instruction pointer.
     fn next_eight_bytes(&mut self) -> [u8; 8] {
         self.bytecode_cache[self.bytecode_cache.len() - 1]
@@ -194,15 +201,20 @@ impl Vm {
 
     fn to_value_ref(&mut self, entry: Entry) -> Rc<RefCell<Value>> {
         match entry {
-            Entry::Pointer(Pointer(idx)) => self.heap.get(idx),
-            Entry::OffsetPointer(Pointer(ptr), idx) => {
-                if let Value::List(ref list) = *self.heap.get(ptr).borrow() {
-                    Rc::new(RefCell::new(list[idx].clone()))
-                } else {
-                    unreachable!()
-                }
-            }
+            Entry::Pointer(Pointer::Heap(idx)) => self.heap.get(idx),
+            // Entry::OffsetPointer(Pointer(ptr), idx) => {
+            //     if let Value::List(ref list) = *self.heap.get(ptr).borrow() {
+            //         let v = Rc::new(RefCell::new(list[idx].clone()));
+            //         dbg!(&v);
+            //         return v;
+            //     } else {
+            //         unreachable!()
+            //     }
+            // }
             Entry::Usize(u) => Rc::new(RefCell::new(Value::Usize(u))),
+            Entry::Pointer(Pointer::Vtable(ptr)) => Rc::new(RefCell::new(Value::Function(
+                self.functions.get(ptr).unwrap().clone(),
+            ))),
             x => todo!("{:?}", x),
         }
     }
@@ -243,7 +255,7 @@ impl Vm {
                         self.upvalues[idx] = Upvalue::Closed(ptr);
                     } else {
                         let ptr = self.heap.insert(entry.into());
-                        self.upvalues[idx] = Upvalue::Closed(Pointer(ptr));
+                        self.upvalues[idx] = Upvalue::Closed(Pointer::Heap(ptr));
                     }
                 } else {
                     // If we reach open upvalues poiting to stack entries below our stack_start,
@@ -265,7 +277,7 @@ impl Vm {
                     unreachable!()
                 }
             }
-            ptr @ Entry::VtablePointer(idx) => (self.functions[idx].clone(), ptr),
+            ptr @ Entry::Pointer(Pointer::Vtable(idx)) => (self.functions[idx].clone(), ptr),
             _ => unreachable!(),
         };
 
@@ -304,7 +316,7 @@ impl Vm {
         let frame = CallFrame {
             ip: 0,
             stack_start: 0,
-            ptr: Entry::Pointer(Pointer(ptr)),
+            ptr: Entry::Pointer(Pointer::Heap(ptr)),
         };
         self.frames.push(frame);
 
@@ -365,21 +377,23 @@ impl Vm {
             let mut offset = 0;
             let forward = true;
 
+            dbg!(&op);
+
             #[cfg(feature = "profile")]
             let opcode_timer_start = std::time::Instant::now();
 
             // An offset to the instruction pointer, for when ops consume more bytes than 1
             match op {
                 Op::SetupValueCache => {
-                    let num_items_bytes = self.next_eight_bytes();
-                    let num_items = usize::from_ne_bytes(num_items_bytes);
-                    let mut items = vec![];
-                    for _ in 0..num_items {
-                        items.push(self.stack.pop().unwrap());
-                    }
-                    for e in items.iter().rev() {
-                        self.cache.push(*e);
-                    }
+                    let _num_items_bytes = self.next_eight_bytes();
+                    // let num_items = usize::from_ne_bytes(num_items_bytes);
+                    // let mut items = vec![];
+                    // for _ in 0..num_items {
+                    //     items.push(self.stack.pop().unwrap());
+                    // }
+                    // for e in items.iter().rev() {
+                    //     self.cache.push(*e);
+                    // }
 
                     offset = 8;
                 }
@@ -407,7 +421,8 @@ impl Vm {
 
                 Op::GetFunction => {
                     let idx = self.next_byte();
-                    self.stack.push(Entry::VtablePointer(idx as usize));
+                    self.stack
+                        .push(Entry::Pointer(Pointer::Vtable(idx as usize)));
                     offset = 1;
                 }
 
@@ -462,7 +477,7 @@ impl Vm {
                                 }
                                 value = Value::Function(f);
                             }
-                            Entry::Pointer(Pointer(self.heap.insert(value)))
+                            Entry::Pointer(Pointer::Heap(self.heap.insert(value)))
                         }
                     };
 
@@ -503,15 +518,41 @@ impl Vm {
 
                 // Gets a list item by index
                 Op::GetMember => {
-                    let idx = self.next_byte();
-                    let entry = self.stack.last_mut().unwrap();
+                    let [first, second] = self.next_two_bytes();
+                    let idx_is_next_byte = first == 1;
 
-                    *entry = match entry {
-                        Entry::Pointer(ref ptr) => Entry::OffsetPointer(*ptr, idx as usize),
-                        _ => unreachable!(),
+                    let idx = if idx_is_next_byte {
+                        offset = 2;
+                        second as usize
+                    } else {
+                        offset = 1;
+                        match self.stack.pop() {
+                            Some(Entry::Usize(idx)) => idx,
+                            Some(e @ Entry::Pointer(Pointer::Heap(_))) => match self.to_value(e) {
+                                Value::Usize(idx) => idx,
+                                x => {
+                                    dbg!(&x);
+                                    unreachable!()
+                                }
+                            },
+                            x => {
+                                dbg!(&x);
+                                unreachable!();
+                            }
+                        }
                     };
-
-                    offset = 1;
+                    dbg!(&idx_is_next_byte, &idx);
+                    dbg!(&self.stack.last_mut());
+                    if let Some(entry) = self.stack.last_mut() { *entry = match entry {
+                            Entry::Pointer(Pointer::Heap(ptr)) => Entry::Pointer(Pointer::Heap(
+                                self.heap.get_list_item_ptr(*ptr, idx as usize),
+                            )),
+                            x => {
+                                dbg!(&x);
+                                unreachable!()
+                            }
+                        }; }
+                    dbg!(&self.stack.last_mut());
                 }
 
                 Op::Set => {
@@ -544,12 +585,14 @@ impl Vm {
                     let rhs = self.stack.pop().unwrap();
 
                     let entry = self.stack.get(self.frame().stack_start + idx as usize);
-
-                    let container_ptr = self.to_value_ref(entry).clone();
-                    if let Value::List(ref mut vec) = *(container_ptr.borrow_mut()) {
-                        (*vec)[property_idx as usize] = self.to_value_ref(rhs).borrow().to_owned();
-                    } else {
-                        unreachable!();
+                    match entry {
+                        Entry::Pointer(Pointer::Heap(ptr)) => {
+                            let item_ptr = self.heap.get_list_item_ptr(ptr, property_idx as usize);
+                            let item = self.heap.get(item_ptr);
+                            let mut item = item.borrow_mut();
+                            *item = self.to_value_ref(rhs).borrow().to_owned();
+                        }
+                        _ => unreachable!(),
                     }
 
                     offset = 2;
@@ -572,6 +615,8 @@ impl Vm {
                     let b = self.stack.pop().unwrap();
                     let a = self.stack.pop().unwrap();
 
+                    dbg!(&a, &b);
+
                     let r = match (a, bin_op, b) {
                         (Entry::Usize(a), InfixOp::Add, Entry::Usize(b)) => Entry::Usize(a + b),
                         (Entry::Usize(a), InfixOp::Sub, Entry::Usize(b)) => Entry::Usize(a - b),
@@ -579,10 +624,7 @@ impl Vm {
                         (Entry::Usize(a), InfixOp::Div, Entry::Usize(b)) => Entry::Usize(a / b),
                         (Entry::Usize(a), InfixOp::Lt, Entry::Usize(b)) => Entry::Bool(a < b),
 
-                        (e1 @ Entry::Pointer(_), op, e2)
-                        | (e1, op, e2 @ Entry::Pointer(_))
-                        | (e1 @ Entry::OffsetPointer(_, _), op, e2)
-                        | (e1, op, e2 @ Entry::OffsetPointer(_, _)) => {
+                        (e1 @ Entry::Pointer(_), op, e2) | (e1, op, e2 @ Entry::Pointer(_)) => {
                             match (
                                 &*self.to_value_ref(e1).borrow(),
                                 op,
@@ -593,12 +635,16 @@ impl Vm {
                                 }
 
                                 (Value::String(a), InfixOp::Mul, Value::Usize(b)) => {
-                                    Entry::Pointer(Pointer(
+                                    Entry::Pointer(Pointer::Heap(
                                         self.heap.insert(Value::String(a.repeat(*b))),
                                     ))
                                 }
 
-                                _ => todo!(),
+                                x => {
+                                    dbg!(&x);
+                                    dbg!(&self.stack);
+                                    todo!()
+                                }
                             }
                         }
 
@@ -607,6 +653,7 @@ impl Vm {
                             unreachable!()
                         }
                     };
+                    dbg!(&r);
                     self.stack.push(r);
                     offset = 1;
                 }
@@ -642,11 +689,23 @@ impl Vm {
                     let mut vec = vec![];
                     for _ in 0..vec_len {
                         let entry = self.stack.pop().unwrap();
-                        vec.push(self.to_value(entry));
+                        match entry {
+                            Entry::Pointer(Pointer::Heap(ptr)) => {
+                                vec.push(ptr);
+                            }
+                            Entry::Usize(n) => {
+                                let ptr = self.heap.insert(Value::Usize(n));
+                                vec.push(ptr);
+                            }
+                            x => {
+                                dbg!(&x);
+                                unreachable!()
+                            }
+                        }
                     }
                     vec.reverse();
                     self.stack
-                        .push(Entry::Pointer(Pointer(self.heap.insert(Value::List(vec)))));
+                        .push(Entry::Pointer(Pointer::Heap(self.heap.create_list(vec))));
                     offset = 8;
                 }
 

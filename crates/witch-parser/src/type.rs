@@ -46,12 +46,12 @@ pub fn struct_declaration<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Resu
     // Possibly constraints for the type variables
     let constraints = where_constraints(p)?;
 
-    let mut generics = HashMap::default();
+    let mut generics = vec![];
     for v in type_vars.into_iter() {
-        generics.insert(v, Type::Any);
-    }
-    for (k, v) in constraints.into_iter() {
-        generics.entry(k).and_modify(|e| *e = v);
+        generics.push((
+            v.clone(),
+            constraints.get(&v).unwrap_or(&Type::Any).to_owned(),
+        ));
     }
 
     // Start the block
@@ -338,17 +338,14 @@ fn function_signature<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<T
     let returns = Box::new(type_literal(p)?);
 
     // Possibly constraints for the type variables
-    let constraints = vec![];
-    if p.at(Kind::KwWhere) {
-        todo!("function signatures generic constraints not yet implemented");
-    }
+    let constraints = where_constraints(p)?;
 
-    let mut generics = HashMap::default();
+    let mut generics = vec![];
     for v in type_vars.into_iter() {
-        generics.insert(v, Type::Any);
-    }
-    for (k, v) in constraints.into_iter() {
-        generics.entry(k).and_modify(|e| *e = v);
+        generics.push((
+            v.clone(),
+            constraints.get(&v).unwrap_or(&Type::Any).to_owned(),
+        ));
     }
 
     Ok(Type::Function {

@@ -8,7 +8,7 @@ use crate::ast::{Ast, Operator};
 #[derive(PartialEq, Clone, Debug)]
 pub enum TypeDecl {
     Struct {
-        generics: HashMap<String, Type>,
+        generics: Vec<(String, Type)>,
         fields: Vec<(String, Type)>,
         methods: Vec<(String, Ast)>,
     },
@@ -109,7 +109,7 @@ pub enum Type {
         is_variadic: bool,
 
         /// A hashmap of defined type variables, e.g. <T, U>(arg: U) -> T {}
-        generics: HashMap<String, Self>,
+        generics: Vec<(String, Self)>,
     },
 
     /// A list of some type
@@ -130,7 +130,7 @@ pub enum Type {
         methods: HashMap<String, (Self, usize)>,
 
         /// A hashmap of defined type variables, e.g. [T, U]
-        generics: HashMap<String, Self>,
+        generics: Vec<(String, Self)>,
     },
 
     /// An interface that other types can be compared against
@@ -154,7 +154,9 @@ pub enum Type {
     EnumVariant(EnumVariant),
 
     /// A variable referencing to a different type (generic or custom made)
-    TypeVar { name: String, inner: Vec<Type> },
+    TypeVar(String),
+
+    WithSubstitutions(Box<Self>, Vec<Self>),
 
     /// A variable referencing a Value
     Var(String),
@@ -211,17 +213,22 @@ impl PartialEq for Type {
                     name: n1,
                     fields: f1,
                     methods: m1,
+                    generics: g1,
                     ..
                 },
                 Type::Struct {
                     name: n2,
                     fields: f2,
                     methods: m2,
+                    generics: g2,
                     ..
                 },
             ) => {
-                // Compare names, if any
-                if let (Some(n1), Some(n2)) = (n1, n2) {
+                // Compare names if no generics are present
+                if let (Some(n1), Some(n2)) = (n1, n2)
+                    && g1.is_empty()
+                    && g2.is_empty()
+                {
                     return n1 == n2;
                 }
 
@@ -250,41 +257,21 @@ impl PartialEq for Type {
                 true
             }
 
-            // Interface == Struct: Duck typed (as long as Struct has matching methods or fields, is a match)
-            (
-                Type::Interface { properties, .. },
-                Type::Struct {
-                    fields, methods, ..
-                },
-            ) => {
-                for (name, ty) in properties.iter() {
-                    // If the property exists as a method
-                    if let Some((method_type, _)) = methods.get(name) {
-                        // Check its type
-                        if ty != method_type {
-                            return false;
-                        }
-                    // If it's not a method, check the fields
-                    } else if fields
-                        .iter()
-                        .filter(|(field_name, field_type)| field_name == name && field_type == ty)
-                        .collect::<Vec<_>>()
-                        .len()
-                        != 1
-                    {
-                        return false;
-                    // Property does not have a corresponding method or field
-                    } else {
-                        return false;
-                    }
-                }
-                true
+            (Type::Interface { properties, .. }, t) | (t, Type::Interface { properties, .. }) => {
+                t.implements(properties)
             }
 
             // Checks whether an Enum Variant is of type Enum.
             // E.g. MyEnum.One == MyEnum
             (Type::Enum(variants), Type::EnumVariant(variant)) => variants.contains(variant),
             (Type::EnumVariant(variant), Type::Enum(variants)) => variants.contains(variant),
+
+            (Type::TypeVar(name), x) | (x, Type::TypeVar(name)) => {
+                panic!(
+                    "cant compare type var {} with {:?}, need to be resolved",
+                    name, x
+                );
+            }
 
             // For primitive types, just match on the enum discriminant
             _ => core::mem::discriminant(self) == core::mem::discriminant(other),
@@ -296,11 +283,8 @@ impl Hash for Type {
     fn hash<H: Hasher>(&self, state: &mut H) {
         // TODO recursively do this for function types.
         match self {
-            Type::TypeVar { name, inner } => {
+            Type::TypeVar(name) => {
                 name.hash(state);
-                for i in inner {
-                    i.hash(state);
-                }
             }
             _ => discriminant(self).hash(state),
         }
@@ -326,6 +310,30 @@ impl From<&Value> for Type {
     }
 }
 
+impl From<&Ast> for Type {
+    fn from(ast: &Ast) -> Type {
+        match ast {
+            Ast::Value(value) => value.into(),
+            Ast::Function {
+                is_variadic,
+                args,
+                returns,
+                generics,
+                ..
+            } => Type::Function {
+                args: args.iter().map(|a| a.clone().1).collect(),
+                returns: Box::new(returns.clone()),
+                is_variadic: *is_variadic,
+                generics: generics.clone(),
+            },
+            x => {
+                dbg!(x);
+                todo!()
+            }
+        }
+    }
+}
+
 impl Type {
     pub fn allowed_infix_operators(&self, rhs: &Type) -> Vec<Operator> {
         match (self, rhs) {
@@ -342,6 +350,77 @@ impl Type {
         }
     }
 
+    pub fn requires_binding(&self) -> bool {
+        matches!(self, Type::Interface { .. } | Type::Intersection { .. })
+    }
+
+    pub fn implements(&self, properties: &HashMap<String, Self>) -> bool {
+        match self {
+            Type::Struct {
+                name: _,
+                fields,
+                methods,
+                generics: _,
+            } => {
+                for (name, ty) in properties.iter() {
+                    // If the property exists as a method
+                    if let Some((method_type, _)) = methods.get(name) {
+                        // Check its type
+                        if ty != method_type {
+                            return false;
+                        }
+                    // If it's not a method, check the fields
+                    } else if fields
+                        .iter()
+                        .filter(|(field_name, field_type)| field_name == name && field_type == ty)
+                        .collect::<Vec<_>>()
+                        .len()
+                        != 1
+                    {
+                        return false;
+                    // Property does not have a corresponding method or field
+                    } else {
+                        return false;
+                    }
+                }
+            }
+            _ => {
+                for (name, ty) in properties.iter() {
+                    // If the property exists as a method
+                    if let Some((method_type, _)) = self.builtin_methods().get(name) {
+                        // Check its type
+                        if ty != method_type {
+                            dbg!(&ty, &method_type);
+                            return false;
+                        }
+                    } else {
+                        return false;
+                    }
+                }
+            }
+        }
+
+        true
+    }
+
+    /// Provides a map of builtin methods for types. TODO the actual methods...
+    pub fn builtin_methods(&self) -> HashMap<String, (Type, usize)> {
+        vec![(
+            "index".to_string(),
+            (
+                Type::Function {
+                    args: vec![Type::Usize],
+                    returns: Box::new(Type::Usize),
+                    is_variadic: false,
+                    generics: vec![],
+                },
+                0,
+            ),
+        )]
+        .into_iter()
+        .collect()
+    }
+
     pub fn is_numeric(&self) -> bool {
         use Type::*;
         matches!(
@@ -351,7 +430,7 @@ impl Type {
     }
 
     pub fn from_str(str: &str, inner: Vec<Type>) -> Type {
-        match &*str.to_lowercase() {
+        let ty = match str {
             "void" => Type::Void,
             "bool" => Type::Bool,
             "string" => Type::String,
@@ -369,10 +448,12 @@ impl Type {
             "isize" => Type::Isize,
             "usize" => Type::Usize,
 
-            _ => Type::TypeVar {
-                name: str.to_string(),
-                inner,
-            },
+            name => Type::TypeVar(name.to_string()),
+        };
+        if !inner.is_empty() {
+            Type::WithSubstitutions(Box::new(ty), inner)
+        } else {
+            ty
         }
     }
 }
