@@ -13,7 +13,7 @@
 use anyhow::Context as AContext;
 use anyhow::Result;
 
-use compiler::Context;
+use compiler::context::Context;
 
 use std::{
     env::current_dir,

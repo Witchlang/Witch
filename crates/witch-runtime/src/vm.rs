@@ -9,7 +9,7 @@ use alloc::vec::Vec;
 use serde::{Deserialize, Serialize};
 
 use crate::heap::Heap;
-use crate::stack::{Entry, Pointer, Stack, Function as StackFunction};
+use crate::stack::{Entry, Function as StackFunction, Pointer, Stack};
 use crate::value::{Function, Value};
 
 #[derive(Debug)]
@@ -137,7 +137,7 @@ pub struct Vm {
     /// Our function vtable. Struct methods go here.
     functions: Vec<StackFunction>,
 
-    /// A list of references to upvalue slots. Each item in upvalue_refs correspond to a function. 
+    /// A list of references to upvalue slots. Each item in upvalue_refs correspond to a function.
     upvalue_refs: Vec<Vec<usize>>,
 
     /// A vec of pointers to the Heap, where we store our upvalues for closures
@@ -214,7 +214,6 @@ impl Vm {
         self.to_value_ref(entry).borrow().clone()
     }
 
-
     /// Moves a stack entry to the heap and stashes a copy of the pointer
     /// among our `upvalues` to be referenced by a closure at a later time
     /// TODO Make it less naive so we dont capture upvalues more than once if necessary
@@ -253,7 +252,7 @@ impl Vm {
             x => {
                 dbg!(&x);
                 unreachable!()
-            },
+            }
         };
 
         let frame = CallFrame {
@@ -276,7 +275,6 @@ impl Vm {
 
         self.bytecode = bytecode;
 
-       
         let frame = CallFrame {
             ip: 0,
             stack_start: 0,
@@ -346,7 +344,6 @@ impl Vm {
 
             // An offset to the instruction pointer, for when ops consume more bytes than 1
             match op {
-                
                 Op::SetupFunctionCache => {
                     let num_items_bytes = self.next_eight_bytes();
                     let num_items = usize::from_ne_bytes(num_items_bytes);
@@ -387,7 +384,6 @@ impl Vm {
                         _ => {
                             // For functions, we need to resolve upvalues before putting it on the heap
                             if let Value::Function(f) = value {
-
                                 let mut upvalue_refs = vec![];
 
                                 for (i, x) in f
@@ -408,19 +404,17 @@ impl Vm {
                                             self.frame().stack_start + idx as usize,
                                         );
                                         upvalue_refs.insert(i, upv);
-                                       
+
                                     // If it's not local, that means it refers to an upvalue among
                                     // this callframe's upvalues, which in turn refers to something else.
                                     } else {
- 
-                                        let upv = self.upvalue_refs[self.frame().upvalues_refs_idx][idx as usize];
+                                        let upv = self.upvalue_refs[self.frame().upvalues_refs_idx]
+                                            [idx as usize];
                                         upvalue_refs.insert(i, upv);
-                                       
                                     }
                                 }
 
                                 self.upvalue_refs.push(upvalue_refs);
-
 
                                 let func_len_bytes = (&self.bytecode
                                     [(ip + 9 + value_length)..(ip + 9 + value_length + 8)])
@@ -431,7 +425,7 @@ impl Vm {
                                 Entry::Function(StackFunction {
                                     addr: ip + 9 + value_length + 8,
                                     arity: f.arity,
-                                    upvalues_refs_idx: self.upvalue_refs.len() - 1
+                                    upvalues_refs_idx: self.upvalue_refs.len() - 1,
                                 })
                             } else {
                                 Entry::Pointer(Pointer::Heap(self.heap.insert(value)))
@@ -456,11 +450,7 @@ impl Vm {
                     let slot = self.next_byte();
                     let idx = self.upvalue_refs[self.frame().upvalues_refs_idx][slot as usize];
 
-                    let mut upv = &self.upvalues[idx];
-
-                    while let Upvalue::Link(idx) = upv {
-                        upv = &self.upvalues[*idx];
-                    }
+                    let upv = &self.upvalues[idx];
 
                     let entry = match upv {
                         Upvalue::Closed(ptr) => Entry::Pointer(*ptr),
