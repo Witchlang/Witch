@@ -44,11 +44,7 @@ pub enum Error {
 #[derive(Serialize, Debug, Deserialize, PartialEq, Clone)]
 pub struct Function {
     pub is_variadic: bool,
-    pub is_method: bool,
     pub arity: usize,
-    pub bytecode: Vec<u8>,
-    pub upvalues: Vec<usize>,
-    pub upvalue_count: u8,
     pub upvalues_bytecode: Vec<u8>,
 }
 impl Function {
@@ -56,11 +52,7 @@ impl Function {
     pub fn new() -> Self {
         Self {
             is_variadic: false,
-            is_method: false,
             arity: 0,
-            bytecode: vec![],
-            upvalues: vec![],
-            upvalue_count: 0,
             upvalues_bytecode: vec![],
         }
     }

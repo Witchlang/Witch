@@ -233,6 +233,6 @@ mod tests {
     #[test]
     fn it_resolves_generics() {
         let mut ts = TypeSystem::new();
-        ts.add_type("MyType".to_string(), Type::String);
+        ts.add_type("MyType".to_string(), Type::String).unwrap();
     }
 }

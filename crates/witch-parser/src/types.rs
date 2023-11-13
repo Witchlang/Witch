@@ -378,8 +378,8 @@ impl Type {
                         != 1
                     {
                         return false;
-                    // Property does not have a corresponding method or field
-                    } 
+                        // Property does not have a corresponding method or field
+                    }
                 }
                 return true;
             }

@@ -28,7 +28,6 @@ pub struct LocalVariable {
     name: String,
     is_captured: bool,
     r#type: Type,
-    is_mutable: bool,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -200,17 +199,18 @@ impl Context {
     pub fn flush(&mut self) -> Vec<u8> {
         let mut bc = self.prelude.take().unwrap_or_default();
 
-        let mut len: usize = 0;
-        for cached in self.value_cache.iter_mut() {
-            if !cached.flushed {
-                cached.flushed = true;
-                bc.append(&mut cached.bytecode.clone());
-                len += 1;
-            }
-        }
-        bc.push(Op::SetupValueCache as u8);
-        let len: [u8; std::mem::size_of::<u64>()] = len.to_ne_bytes();
-        bc.append(&mut len.to_vec());
+        // let mut len: usize = 0;
+        // for cached in self.value_cache.iter_mut() {
+        //     if !cached.flushed {
+        //         dbg!(&cached);
+        //         cached.flushed = true;
+        //         bc.append(&mut cached.bytecode.clone());
+        //         len += 1;
+        //     }
+        // }
+        // bc.push(Op::SetupValueCache as u8);
+        // let len: [u8; std::mem::size_of::<u64>()] = len.to_ne_bytes();
+        // bc.append(&mut len.to_vec());
 
         let mut len: usize = 0;
         for cached in self.functions_cache.iter_mut() {
@@ -457,12 +457,6 @@ fn call(ctx: &mut Context, expr: &Box<Ast>, args: &Vec<Ast>) -> Result<(Vec<u8>,
             returns,
             generics,
         } => {
-            // {
-            //     for (k, v) in ctx.scope()?.generics.iter() {
-            //         generics.entry(k.to_string()).or_insert(v.clone());
-            //     }
-            // }
-
             ctx.push_type_scope(&generics);
 
             // Compare arguments length against the type.
@@ -492,12 +486,11 @@ fn call(ctx: &mut Context, expr: &Box<Ast>, args: &Vec<Ast>) -> Result<(Vec<u8>,
                 }
             }
 
-            //ctx.scope()?.bindings.push(HashMap::default());
             // Type check arguments and update the `bindings` map with what our generics correspond to for this call
             for (idx, wanted_type) in arg_types.into_iter().enumerate() {
                 let supplied_type = args_with_types[idx].1.clone();
 
-                let resolved_wanted_type = ctx.ts.resolve(wanted_type.clone())?; // ctx.ts.resolve_recursive(wanted_type.clone(), vec![generics.clone()]);
+                let resolved_wanted_type = ctx.ts.resolve(wanted_type.clone())?;
 
                 if resolved_wanted_type != supplied_type {
                     panic!(
@@ -547,14 +540,6 @@ fn function(
     body: &Box<Ast>,
     generics: &Vec<(String, Type)>,
 ) -> Result<(Vec<u8>, Type)> {
-    // If there is a surrounding function type context (like if this function is an argument to
-    // a surrounding function), we inherit its generics definitions where we dont make our own
-    // TODO this can likely be put in the Scopes
-    // {
-    //     for (k, v) in ctx.scope()?.generics.iter() {
-    //         generics.entry(k.to_string()).or_insert(v.clone());
-    //     }
-    // }
     ctx.push_type_scope(generics);
 
     let ty = Type::Function {
@@ -570,7 +555,6 @@ fn function(
     ctx.current_function_type = Some(ty.clone());
 
     let mut scope = Scope::default();
-    // scope.generics = generics.clone();
 
     // If the parent expression is a struct declaration, that means this is a method and so should have
     // an implicit `self` variable injected
@@ -585,7 +569,6 @@ fn function(
         scope.locals.push(LocalVariable {
             name: "self".to_string(),
             is_captured: false,
-            is_mutable: false,
             r#type: Type::TypeVar(name.clone()),
         })
     }
@@ -593,7 +576,6 @@ fn function(
     for (arg_name, arg_type) in args.iter() {
         scope.locals.push(LocalVariable {
             name: arg_name.clone(),
-            is_mutable: false,
             is_captured: false,
             r#type: arg_type.clone(),
         })
@@ -611,7 +593,6 @@ fn function(
         }
         upvalues_bytecode.push(u.index as u8); // todo allow largers size here?
     });
-    let upvalue_count = ctx.scope()?.upvalues.len() as u8;
 
     ctx.scopes.pop();
 
@@ -620,31 +601,17 @@ fn function(
 
     ctx.current_function_type = current_function_type_copy;
 
-    let mut is_method = false;
-    for parent in ctx.lineage.iter().rev() {
-        if matches!(
-            parent,
-            &Ast::Type {
-                decl: TypeDecl::Struct { .. },
-                ..
-            }
-        ) {
-            is_method = true;
-            break;
-        }
-    }
-
     let function = Value::Function(Function {
         is_variadic: *is_variadic,
-        is_method,
         arity,
-        bytecode: func_bytecode,
-        upvalue_count,
-        upvalues: vec![],
         upvalues_bytecode,
     });
 
-    let (function_bytecode, _) = compile(ctx, &Ast::Value(function))?;
+    let (mut function_bytecode, _) = compile(ctx, &Ast::Value(function))?;
+
+    let length: [u8; std::mem::size_of::<usize>()] = func_bytecode.len().to_ne_bytes();
+    function_bytecode.append(&mut length.to_vec());
+    function_bytecode.append(&mut func_bytecode.to_vec());
 
     Ok((function_bytecode, ty))
 }
@@ -786,9 +753,6 @@ fn member(
         x => todo!("{:?}", x),
     }
 
-    panic!("what");
-
-    Ok((bytecode, Type::Unknown))
 }
 
 /// Pops the current call frame
@@ -914,7 +878,6 @@ fn decl_type(
         } => {
             let typ = Type::Enum(variants.clone());
             ctx.add_type(name.to_string(), typ.clone())?;
-            ctx.scope()?.types.insert(name.to_string(), typ.clone());
             Ok((vec![], typ))
         }
 
@@ -969,119 +932,8 @@ fn decl_type(
                 generics: generics.clone(),
             };
             ctx.add_type(name.to_string(), typ.clone())?;
-            ctx.scope()?.types.insert(name.to_string(), typ.clone());
             Ok((vec![], typ))
         }
-        // TypeDecl::Interface { properties } => Type::Interface {
-        //     name: name.to_string(),
-        //     properties: properties
-        //         .to_owned()
-        //         .into_iter()
-        //         .map(|(s, t)| {
-        //             if let Type::Function {
-        //                 args,
-        //                 returns,
-        //                 is_variadic,
-        //                 generics,
-        //                 ..
-        //             } = t
-        //             {
-        //                 (
-        //                     s,
-        //                     Type::Function {
-        //                         is_method: true,
-        //                         args,
-        //                         returns,
-        //                         is_variadic,
-        //                         generics,
-        //                     },
-        //                 )
-        //             } else {
-        //                 (s, t)
-        //             }
-        //         })
-        //         .collect::<hashbrown::HashMap<String, Type>>(),
-        // },
-        // TypeDecl::Struct {
-        //     fields,
-        //     methods: methods_expr,
-        // } => {
-        //     let mut methods = hashbrown::HashMap::default();
-
-        //     program.compiler_stack[compiler].types.insert(
-        //         name.to_string(),
-        //         Type::Struct {
-        //             name: name.to_string(),
-        //             fields: fields
-        //                 .to_owned()
-        //                 .into_iter()
-        //                 .collect::<hashbrown::HashMap<String, Type>>(),
-        //             methods: methods.clone(),
-        //         },
-        //     );
-
-        //     for (method_name, expr) in methods_expr {
-        //         program.compiler(compiler).self_ctx = Some(name.clone());
-        //         let expr = if let Expr::Function {
-        //             is_variadic,
-        //             args,
-        //             body,
-        //             r#type,
-        //             ..
-        //         } = expr.clone()
-        //         {
-        //             Expr::Function {
-        //                 is_variadic,
-        //                 is_method: true,
-        //                 args,
-        //                 body,
-        //                 r#type,
-        //             }
-        //         } else {
-        //             expr.to_owned()
-        //         };
-        //         let (method_bc, mut method_signature) = walk(program, compiler, &expr);
-        //         program.compiler(compiler).self_ctx = None;
-        //         if let Type::Function {
-        //             args,
-        //             returns,
-        //             is_variadic,
-        //             generics,
-        //             ..
-        //         } = method_signature
-        //         {
-        //             method_signature = Type::Function {
-        //                 is_method: true,
-        //                 args,
-        //                 returns,
-        //                 is_variadic,
-        //                 generics,
-        //             };
-        //         }
-        //         methods.insert(method_name.to_string(), (method_signature, method_bc));
-        //         program.compiler_stack[compiler].types.insert(
-        //             name.to_string(),
-        //             Type::Struct {
-        //                 name: name.to_string(),
-        //                 fields: fields.to_owned().into_iter().collect::<hashbrown::HashMap<
-        //                     String,
-        //                     Type,
-        //                 >>(
-        //                 ),
-        //                 methods: methods.clone(),
-        //             },
-        //         );
-        //     }
-        //     Type::Struct {
-        //         name: name.to_string(),
-        //         fields: fields
-        //             .to_owned()
-        //             .into_iter()
-        //             .collect::<hashbrown::HashMap<String, Type>>(),
-        //         methods,
-        //     }
-        // }
-        _ => todo!(),
     }
 }
 
@@ -1090,7 +942,7 @@ fn let_(
     ctx: &mut Context,
     ident: &str,
     annotated_type: &Option<Type>,
-    expr: &Box<Ast>,
+    expr: &Ast,
     _span: &Range<usize>,
 ) -> Result<(Vec<u8>, Type)> {
     // Create a new local var of type `ty`
@@ -1099,7 +951,6 @@ fn let_(
     ctx.assignment_ctx = Some((ident.to_owned(), ty.clone()));
     let local_variable = LocalVariable {
         name: ident.to_string(),
-        is_mutable: false,
         is_captured: false,
         r#type: ty.clone(),
     };

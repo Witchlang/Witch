@@ -10,6 +10,14 @@ pub enum Pointer {
     Vtable(usize),
 }
 
+/// Pointer is a usize referring to a Value on the heap
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct Function {
+    pub addr: usize,
+    pub arity: usize,
+    pub upvalues_refs_idx: usize,
+}
+
 #[derive(Copy, Clone, Debug)]
 pub enum Entry {
     Void,
@@ -17,6 +25,7 @@ pub enum Entry {
     Usize(usize),
     Bool(bool),
     Pointer(Pointer),
+    Function(Function),
 }
 
 impl Entry {

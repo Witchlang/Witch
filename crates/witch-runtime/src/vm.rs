@@ -1,12 +1,15 @@
 use core::cell::RefCell;
 
+#[cfg(feature = "profile")]
+use std::collections::HashMap;
+
 use alloc::rc::Rc;
 use alloc::vec;
 use alloc::vec::Vec;
 use serde::{Deserialize, Serialize};
 
 use crate::heap::Heap;
-use crate::stack::{Entry, Pointer, Stack};
+use crate::stack::{Entry, Pointer, Stack, Function as StackFunction};
 use crate::value::{Function, Value};
 
 #[derive(Debug)]
@@ -16,9 +19,6 @@ enum Upvalue {
 
     /// If its not yet closed over, it contains the stack index of where the value resides
     Open(usize),
-
-    /// Points to a different upvalue
-    Link(usize),
 }
 
 #[repr(u8)]
@@ -120,8 +120,9 @@ impl core::convert::From<u8> for Op {
 
 #[derive(Clone, Copy, Debug)]
 pub struct CallFrame {
-    pub ptr: Entry,
+    //pub ptr: Entry,
     pub ip: usize,
+    pub upvalues_refs_idx: usize,
     stack_start: usize,
 }
 
@@ -131,10 +132,13 @@ pub struct Vm {
     frames: Vec<CallFrame>,
 
     /// The bytecode of the current callframe. Only used for lookups (next N bytes, etc..)
-    bytecode_cache: Vec<Vec<u8>>,
+    bytecode: Vec<u8>,
 
     /// Our function vtable. Struct methods go here.
-    functions: Vec<Function>,
+    functions: Vec<StackFunction>,
+
+    /// A list of references to upvalue slots. Each item in upvalue_refs correspond to a function. 
+    upvalue_refs: Vec<Vec<usize>>,
 
     /// A vec of pointers to the Heap, where we store our upvalues for closures
     upvalues: Vec<Upvalue>,
@@ -152,8 +156,9 @@ impl Vm {
             stack: Stack::new(),
             heap: Heap::default(),
             frames: vec![],
-            bytecode_cache: vec![],
+            bytecode: vec![],
             functions: vec![],
+            upvalue_refs: vec![],
             upvalues: vec![],
         }
     }
@@ -175,25 +180,24 @@ impl Vm {
 
     /// Retrieves the byte which the instruction pointer is currently pointing at.
     fn current_byte(&mut self) -> u8 {
-        self.bytecode_cache[self.bytecode_cache.len() - 1][self.frame().ip]
+        self.bytecode[self.frame().ip]
     }
 
     /// Retrieves the byte which is after the byte that the instruction pointer is currently pointing at.
     fn next_byte(&mut self) -> u8 {
-        self.bytecode_cache[self.bytecode_cache.len() - 1][self.frame().ip + 1]
+        self.bytecode[self.frame().ip + 1]
     }
 
     fn next_two_bytes(&mut self) -> [u8; 2] {
         [
-            self.bytecode_cache[self.bytecode_cache.len() - 1][self.frame().ip + 1],
-            self.bytecode_cache[self.bytecode_cache.len() - 1][self.frame().ip + 2],
+            self.bytecode[self.frame().ip + 1],
+            self.bytecode[self.frame().ip + 2],
         ]
     }
 
     /// Retrieves the next 8 bytes from the current instruction pointer.
     fn next_eight_bytes(&mut self) -> [u8; 8] {
-        self.bytecode_cache[self.bytecode_cache.len() - 1]
-            [self.frame().ip + 1..self.frame().ip + 1 + 8]
+        self.bytecode[self.frame().ip + 1..self.frame().ip + 1 + 8]
             .try_into()
             .unwrap()
     }
@@ -202,9 +206,6 @@ impl Vm {
         match entry {
             Entry::Pointer(Pointer::Heap(idx)) => self.heap.get(idx),
             Entry::Usize(u) => Rc::new(RefCell::new(Value::Usize(u))),
-            Entry::Pointer(Pointer::Vtable(ptr)) => Rc::new(RefCell::new(Value::Function(
-                self.functions.get(ptr).unwrap().clone(),
-            ))),
             x => todo!("{:?}", x),
         }
     }
@@ -213,24 +214,12 @@ impl Vm {
         self.to_value_ref(entry).borrow().clone()
     }
 
-    // FIXME this shuldnt clone f
-    fn deref_function(&mut self, ptr: Pointer) -> Function {
-        if let Value::Function(ref f) = *self.to_value_ref(Entry::Pointer(ptr)).clone().borrow() {
-            return f.clone();
-        }
-        unreachable!()
-    }
 
     /// Moves a stack entry to the heap and stashes a copy of the pointer
     /// among our `upvalues` to be referenced by a closure at a later time
     /// TODO Make it less naive so we dont capture upvalues more than once if necessary
     fn capture_upvalue(&mut self, idx: usize) -> usize {
         self.upvalues.push(Upvalue::Open(idx));
-        self.upvalues.len() - 1
-    }
-
-    fn link_upvalue(&mut self, idx: usize) -> usize {
-        self.upvalues.push(Upvalue::Link(idx));
         self.upvalues.len() - 1
     }
 
@@ -258,25 +247,21 @@ impl Vm {
 
     // TODO OPTIMIZE, no clones, make all bytecode easier to reference ????
     pub fn push_callframe(&mut self, entry: Entry) {
-        let (f, ptr) = match entry {
-            ptr @ Entry::Pointer(_) => {
-                let fun = self.to_value(ptr);
-                if let Value::Function(f) = fun {
-                    (f, ptr)
-                } else {
-                    unreachable!()
-                }
-            }
-            _ => unreachable!(),
+        let f = match entry {
+            Entry::Function(f) => f,
+            Entry::Pointer(Pointer::Vtable(p)) => self.functions[p],
+            x => {
+                dbg!(&x);
+                unreachable!()
+            },
         };
 
         let frame = CallFrame {
-            ip: 0,
+            ip: f.addr,
             stack_start: self.stack.len() - f.arity,
-            ptr,
+            upvalues_refs_idx: f.upvalues_refs_idx,
         };
 
-        self.bytecode_cache.push(f.bytecode.clone());
         self.frames.push(frame);
     }
 
@@ -289,21 +274,13 @@ impl Vm {
             return Ok(Value::Void);
         }
 
-        self.bytecode_cache.push(bytecode.clone());
+        self.bytecode = bytecode;
 
-        let ptr = self.heap.insert(Value::Function(Function {
-            is_variadic: false,
-            is_method: false,
-            arity: 0,
-            bytecode,
-            upvalue_count: 0,
-            upvalues: vec![],
-            upvalues_bytecode: vec![],
-        }));
+       
         let frame = CallFrame {
             ip: 0,
             stack_start: 0,
-            ptr: Entry::Pointer(Pointer::Heap(ptr)),
+            upvalues_refs_idx: 0,
         };
         self.frames.push(frame);
 
@@ -347,8 +324,8 @@ impl Vm {
             // we implicitly return from the current call frame by popping self.frames.
             //
             // If there are no more frames left, we break the loop and move to the return down below.
-            if self.frame().ip > self.bytecode_cache[self.bytecode_cache.len() - 1].len() - 1 {
-                if (self.frames.pop().is_none() && self.bytecode_cache.pop().is_none())
+            if self.frame().ip > self.bytecode.len() - 1 {
+                if self.frames.pop().is_none()
                     || (self.frames.len() > 1 && self.frames.len() - 1 < bottom_frame)
                 {
                     break;
@@ -369,19 +346,7 @@ impl Vm {
 
             // An offset to the instruction pointer, for when ops consume more bytes than 1
             match op {
-                Op::SetupValueCache => {
-                    let _num_items_bytes = self.next_eight_bytes();
-                    // let num_items = usize::from_ne_bytes(num_items_bytes);
-                    // let mut items = vec![];
-                    // for _ in 0..num_items {
-                    //     items.push(self.stack.pop().unwrap());
-                    // }
-                    // for e in items.iter().rev() {
-                    //     self.cache.push(*e);
-                    // }
-
-                    offset = 8;
-                }
+                
                 Op::SetupFunctionCache => {
                     let num_items_bytes = self.next_eight_bytes();
                     let num_items = usize::from_ne_bytes(num_items_bytes);
@@ -390,13 +355,13 @@ impl Vm {
                         items.push(self.stack.pop().unwrap());
                     }
                     for e in items.iter().rev() {
-                        if let Value::Function(ref f) = self.to_value_ref(*e).borrow().clone() {
-                            self.functions.push(f.clone());
+                        if let Entry::Function(f) = e {
+                            self.functions.push(*f);
                         }
                     }
                     offset = 8;
                 }
-                
+
                 Op::GetFunction => {
                     let idx = self.next_byte();
                     self.stack
@@ -408,10 +373,10 @@ impl Vm {
                     let value_length_bytes: [u8; 8] = self.next_eight_bytes();
                     let value_length = usize::from_ne_bytes(value_length_bytes);
                     let ip = self.frame().ip;
-                    let value_bytes = &self.bytecode_cache[self.bytecode_cache.len() - 1]
-                        [(ip + 9)..(ip + 9 + value_length)];
+                    let value_bytes = &self.bytecode[(ip + 9)..(ip + 9 + value_length)];
+                    let mut additional_offset = 0;
 
-                    let (mut value, _): (Value, usize) =
+                    let (value, _): (Value, usize) =
                         bincode::serde::decode_from_slice(value_bytes, bincode::config::legacy())
                             .unwrap();
 
@@ -421,7 +386,10 @@ impl Vm {
                         // Todo all primitive types that get to be stack entries
                         _ => {
                             // For functions, we need to resolve upvalues before putting it on the heap
-                            if let Value::Function(mut f) = value {
+                            if let Value::Function(f) = value {
+
+                                let mut upvalue_refs = vec![];
+
                                 for (i, x) in f
                                     .upvalues_bytecode
                                     .as_slice()
@@ -436,32 +404,44 @@ impl Vm {
                                     // in our local callframe's stack. We need to capture it to make sure
                                     // it keeps on living after we pop this frame.
                                     if is_local == 1 {
-                                        f.upvalues.insert(
-                                            i,
-                                            self.capture_upvalue(
-                                                self.frame().stack_start + idx as usize,
-                                            ),
-                                        )
+                                        let upv = self.capture_upvalue(
+                                            self.frame().stack_start + idx as usize,
+                                        );
+                                        upvalue_refs.insert(i, upv);
+                                       
                                     // If it's not local, that means it refers to an upvalue among
                                     // this callframe's upvalues, which in turn refers to something else.
                                     } else {
-                                        let func =
-                                            self.deref_function(self.frame().ptr.as_heap_pointer());
-                                        f.upvalues.insert(
-                                            i,
-                                            self.link_upvalue(func.upvalues[idx as usize]),
-                                        )
+ 
+                                        let upv = self.upvalue_refs[self.frame().upvalues_refs_idx][idx as usize];
+                                        upvalue_refs.insert(i, upv);
+                                       
                                     }
                                 }
-                                value = Value::Function(f);
+
+                                self.upvalue_refs.push(upvalue_refs);
+
+
+                                let func_len_bytes = (&self.bytecode
+                                    [(ip + 9 + value_length)..(ip + 9 + value_length + 8)])
+                                    .try_into()
+                                    .unwrap();
+                                additional_offset = usize::from_ne_bytes(func_len_bytes) + 8;
+
+                                Entry::Function(StackFunction {
+                                    addr: ip + 9 + value_length + 8,
+                                    arity: f.arity,
+                                    upvalues_refs_idx: self.upvalue_refs.len() - 1
+                                })
+                            } else {
+                                Entry::Pointer(Pointer::Heap(self.heap.insert(value)))
                             }
-                            Entry::Pointer(Pointer::Heap(self.heap.insert(value)))
                         }
                     };
 
                     self.stack.push(stackentry);
 
-                    offset = 8 + value_length;
+                    offset = 8 + value_length + additional_offset;
                 }
 
                 Op::Get => {
@@ -474,9 +454,7 @@ impl Vm {
 
                 Op::GetUpvalue => {
                     let slot = self.next_byte();
-                    let idx = self
-                        .deref_function(self.frame().ptr.as_heap_pointer())
-                        .upvalues[slot as usize];
+                    let idx = self.upvalue_refs[self.frame().upvalues_refs_idx][slot as usize];
 
                     let mut upv = &self.upvalues[idx];
 
@@ -645,7 +623,6 @@ impl Vm {
                 // and puts the return value on top of it.
                 Op::Return => {
                     let frame = self.frames.pop().unwrap();
-                    self.bytecode_cache.pop();
 
                     self.close_upvalues(frame);
 
