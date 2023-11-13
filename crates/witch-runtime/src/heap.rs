@@ -54,13 +54,11 @@ impl Heap {
                 }
                 Rc::new(RefCell::new(Value::List(l)))
             }
-            _ => unreachable!(),
         }
     }
 
     pub fn get_list_item_ptr(&mut self, key: usize, idx: usize) -> usize {
         let obj = self.mem.get_mut(key).unwrap();
-        dbg!(&obj, &idx);
         match obj {
             Object::List(list) => list[idx],
             _ => unreachable!(),

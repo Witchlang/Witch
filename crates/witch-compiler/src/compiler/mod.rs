@@ -331,12 +331,12 @@ pub fn compile<'a>(ctx: &mut Context, ast: &Ast) -> Result<(Vec<u8>, Type)> {
 /// It needs to either be mutable or the parent expr needs to be `Ast::Let`.
 fn assignment(
     ctx: &mut Context,
-    lhs: &Box<Ast>,
-    rhs: &Box<Ast>,
+    lhs: &Ast,
+    rhs: &Ast,
     _span: &Range<usize>,
 ) -> Result<(Vec<u8>, Type)> {
     let mut member_key = None;
-    let ident = match *(lhs.clone()) {
+    let ident = match lhs.clone() {
         Ast::Var(ident) => ident,
         Ast::Member { container, key, .. } => match *container {
             Ast::Var(ident) => {
@@ -411,12 +411,15 @@ fn assignment(
 /// during compilation.
 fn call(ctx: &mut Context, expr: &Box<Ast>, args: &Vec<Ast>) -> Result<(Vec<u8>, Type)> {
     let mut bytecode = vec![];
-    // If this is being called on an Entry expression, that means a method call.
+    let mut arity = args.len();
+
+    // If this is being called on a Member expression, that means a method call.
     // Method call means we have an implicit `self` variable as a first argument.
     // Let's stick the Entry object on the stack before the arguments then.
     if let Ast::Member { container, .. } = *expr.clone() {
         let (mut bc, _) = compile(ctx, &container)?;
         bytecode.append(&mut bc);
+        arity += 1;
     }
 
     let mut args_with_types = vec![];
@@ -494,32 +497,6 @@ fn call(ctx: &mut Context, expr: &Box<Ast>, args: &Vec<Ast>) -> Result<(Vec<u8>,
             for (idx, wanted_type) in arg_types.into_iter().enumerate() {
                 let supplied_type = args_with_types[idx].1.clone();
 
-                // If wanted type is a variable type, check if its supplied in the function's generics constraints.
-                // If it is, compare it against the supplied type and update the bindings table.
-                // If it isn't, resolve it to an actual type and compare it against the supplied one.
-                // match wanted_type {
-                //     ref wanted @ Type::TypeVar { ref name, .. } => {
-                //         if let Some(constraint) = generics.get(name) {
-                //             if supplied_type == ctx.ts.resolve(constraint.clone()) {
-                //                 bindings.insert(wanted.clone(), supplied_type);
-                //             } else {
-                //                 dbg!( &supplied_type, &constraint, ctx.ts.resolve(constraint.clone()));
-                //                 panic!("poop");
-                //             }
-                //         } else {
-                //             let ty = ctx.ts.resolve(wanted.clone());
-                //             if ty != supplied_type {
-                //                 return Err(Error::fatal()); //todo
-                //             }
-                //         }
-                //     }
-                //     wanted => {
-                //         if wanted != supplied_type {
-                //             return Err(Error::fatal()); //todo
-                //         }
-                //     }
-                // }
-
                 let resolved_wanted_type = ctx.ts.resolve(wanted_type.clone())?; // ctx.ts.resolve_recursive(wanted_type.clone(), vec![generics.clone()]);
 
                 if resolved_wanted_type != supplied_type {
@@ -539,11 +516,20 @@ fn call(ctx: &mut Context, expr: &Box<Ast>, args: &Vec<Ast>) -> Result<(Vec<u8>,
 
             bytecode.append(&mut bc);
             bytecode.push(Op::Call as u8);
-            bytecode.push(u8::try_from(args.len()).unwrap());
 
-            let return_type = ctx.ts.resolve(*returns)?; //ctx.scope()?.bindings.last().unwrap().get(&*(returns.clone())).unwrap_or(&returns);
+            let return_type = ctx.ts.resolve(*returns)?;
             ctx.pop_type_scope();
-            Ok((bytecode, return_type.clone()))
+
+            // +9 to account for the length itself (8 bytes) and advance the IP to the byte after
+            let length: [u8; std::mem::size_of::<usize>()] = (bytecode.len() + 9).to_ne_bytes();
+            Ok((
+                vec![Op::SetReturn as u8]
+                    .into_iter()
+                    .chain(length)
+                    .chain(bytecode)
+                    .collect(),
+                return_type.clone(),
+            ))
         }
         _ => {
             dbg!(called_type);
@@ -594,7 +580,7 @@ fn function(
         ..
     } = &ctx.lineage[ctx.lineage.len() - 2]
     {
-        arity += 1;
+        arity += 2;
 
         scope.locals.push(LocalVariable {
             name: "self".to_string(),
@@ -631,13 +617,6 @@ fn function(
 
     // TODO typecheck returns
     // if the provided return type is more loose than the actually_returns type, overwrite it
-
-    // If the function ends with a return statement from a Block expression [..., Return, 0_u8, _],
-    // we can safely remove that since we're providing our own Return opcode from the function.
-    //let last_three = &func_bytecode[func_bytecode.len() - 3..func_bytecode.len() - 1];
-    //if last_three == &[OpCode::Return as u8, 0_u8] {
-    //    func_bytecode.truncate(func_bytecode.len() - 3);
-    //}
 
     ctx.current_function_type = current_function_type_copy;
 
@@ -708,7 +687,7 @@ fn if_(
 
 /// Expresses a binary operation such as 1 + 1, a == b, 9 > 8, etc.
 /// Requres the two expressions to be of the same type.
-fn infix(ctx: &mut Context, a: &Box<Ast>, op: &Operator, b: &Box<Ast>) -> Result<(Vec<u8>, Type)> {
+fn infix(ctx: &mut Context, a: &Ast, op: &Operator, b: &Ast) -> Result<(Vec<u8>, Type)> {
     let (mut bytecode, a_type) = compile(ctx, a)?;
     let (mut bytecode_b, b_type) = compile(ctx, b)?;
 
@@ -752,11 +731,6 @@ fn member(
         } => {
             if let Key::String(key) = key {
                 for (idx, (name, ty)) in fields.iter().enumerate() {
-                    if name == "cursor" {
-                        dbg!(idx as u8, &key);
-                    } else {
-                        dbg!(&name, &idx);
-                    }
                     if name == key {
                         bytecode.push(Op::GetMember as u8);
                         bytecode.push(1_u8);
@@ -788,7 +762,6 @@ fn member(
             }
             Key::Expression(expr) => {
                 let (mut key_bytecode, key_type) = compile(ctx, expr)?;
-                dbg!(&expr);
                 if key_type != Type::Usize {
                     panic!("lists can only be indexed by usize");
                 }

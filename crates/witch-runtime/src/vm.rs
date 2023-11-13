@@ -22,8 +22,7 @@ enum Upvalue {
 }
 
 #[repr(u8)]
-#[cfg_attr(debug_assertions, derive(Debug))]
-#[derive(Eq, PartialEq, Clone)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub enum InfixOp {
     Add,
     Sub,
@@ -76,6 +75,7 @@ pub enum Op {
     Set,
     SetProperty,
 
+    SetReturn,
     Jump,
     JumpIfFalse,
 
@@ -103,14 +103,15 @@ impl core::convert::From<u8> for Op {
             8 => Op::Set,
             9 => Op::SetProperty,
 
-            10 => Op::Jump,
-            11 => Op::JumpIfFalse,
+            10 => Op::SetReturn,
+            11 => Op::Jump,
+            12 => Op::JumpIfFalse,
 
-            12 => Op::Binary,
-            13 => Op::Return,
-            14 => Op::Call,
+            13 => Op::Binary,
+            14 => Op::Return,
+            15 => Op::Call,
 
-            15 => Op::Collect,
+            16 => Op::Collect,
 
             _ => Op::Crash,
         }
@@ -137,7 +138,6 @@ pub struct Vm {
 
     /// A vec of pointers to the Heap, where we store our upvalues for closures
     upvalues: Vec<Upvalue>,
-    cache: Vec<Entry>,
 }
 
 impl Default for Vm {
@@ -155,7 +155,6 @@ impl Vm {
             bytecode_cache: vec![],
             functions: vec![],
             upvalues: vec![],
-            cache: vec![],
         }
     }
 
@@ -202,15 +201,6 @@ impl Vm {
     fn to_value_ref(&mut self, entry: Entry) -> Rc<RefCell<Value>> {
         match entry {
             Entry::Pointer(Pointer::Heap(idx)) => self.heap.get(idx),
-            // Entry::OffsetPointer(Pointer(ptr), idx) => {
-            //     if let Value::List(ref list) = *self.heap.get(ptr).borrow() {
-            //         let v = Rc::new(RefCell::new(list[idx].clone()));
-            //         dbg!(&v);
-            //         return v;
-            //     } else {
-            //         unreachable!()
-            //     }
-            // }
             Entry::Usize(u) => Rc::new(RefCell::new(Value::Usize(u))),
             Entry::Pointer(Pointer::Vtable(ptr)) => Rc::new(RefCell::new(Value::Function(
                 self.functions.get(ptr).unwrap().clone(),
@@ -267,7 +257,7 @@ impl Vm {
     }
 
     // TODO OPTIMIZE, no clones, make all bytecode easier to reference ????
-    pub fn push_callframe(&mut self, entry: Entry, offset: usize) {
+    pub fn push_callframe(&mut self, entry: Entry) {
         let (f, ptr) = match entry {
             ptr @ Entry::Pointer(_) => {
                 let fun = self.to_value(ptr);
@@ -277,7 +267,6 @@ impl Vm {
                     unreachable!()
                 }
             }
-            ptr @ Entry::Pointer(Pointer::Vtable(idx)) => (self.functions[idx].clone(), ptr),
             _ => unreachable!(),
         };
 
@@ -288,8 +277,6 @@ impl Vm {
         };
 
         self.bytecode_cache.push(f.bytecode.clone());
-
-        self.frame_mut().ip = self.frame().ip + offset; // One to advance the instruction pointer, plus one offset for the arg_len
         self.frames.push(frame);
     }
 
@@ -377,8 +364,6 @@ impl Vm {
             let mut offset = 0;
             let forward = true;
 
-            dbg!(&op);
-
             #[cfg(feature = "profile")]
             let opcode_timer_start = std::time::Instant::now();
 
@@ -411,14 +396,7 @@ impl Vm {
                     }
                     offset = 8;
                 }
-
-                Op::GetValue => {
-                    let idx = self.next_byte();
-                    let val = self.cache[idx as usize];
-                    self.stack.push(val);
-                    offset = 1;
-                }
-
+                
                 Op::GetFunction => {
                     let idx = self.next_byte();
                     self.stack
@@ -526,6 +504,7 @@ impl Vm {
                         second as usize
                     } else {
                         offset = 1;
+
                         match self.stack.pop() {
                             Some(Entry::Usize(idx)) => idx,
                             Some(e @ Entry::Pointer(Pointer::Heap(_))) => match self.to_value(e) {
@@ -541,9 +520,8 @@ impl Vm {
                             }
                         }
                     };
-                    dbg!(&idx_is_next_byte, &idx);
-                    dbg!(&self.stack.last_mut());
-                    if let Some(entry) = self.stack.last_mut() { *entry = match entry {
+                    if let Some(entry) = self.stack.last_mut() {
+                        *entry = match entry {
                             Entry::Pointer(Pointer::Heap(ptr)) => Entry::Pointer(Pointer::Heap(
                                 self.heap.get_list_item_ptr(*ptr, idx as usize),
                             )),
@@ -551,8 +529,8 @@ impl Vm {
                                 dbg!(&x);
                                 unreachable!()
                             }
-                        }; }
-                    dbg!(&self.stack.last_mut());
+                        };
+                    }
                 }
 
                 Op::Set => {
@@ -598,6 +576,14 @@ impl Vm {
                     offset = 2;
                 }
 
+                // Sets the next byte as the return address on the stack.
+                // This gets placed before the arguments for an upcoming Call instruction.
+                Op::SetReturn => {
+                    let jmp_offset = usize::from_ne_bytes(self.next_eight_bytes());
+                    self.stack.push(Entry::Usize(self.frame().ip + jmp_offset));
+                    offset = 8;
+                }
+
                 Op::Jump => {}
 
                 Op::JumpIfFalse => {
@@ -614,8 +600,6 @@ impl Vm {
                     let bin_op = InfixOp::from(self.next_byte());
                     let b = self.stack.pop().unwrap();
                     let a = self.stack.pop().unwrap();
-
-                    dbg!(&a, &b);
 
                     let r = match (a, bin_op, b) {
                         (Entry::Usize(a), InfixOp::Add, Entry::Usize(b)) => Entry::Usize(a + b),
@@ -653,7 +637,6 @@ impl Vm {
                             unreachable!()
                         }
                     };
-                    dbg!(&r);
                     self.stack.push(r);
                     offset = 1;
                 }
@@ -667,21 +650,31 @@ impl Vm {
                     self.close_upvalues(frame);
 
                     let result = self.stack.pop().unwrap();
+
                     self.stack.truncate(frame.stack_start);
+
+                    let ret = &self.stack.pop().unwrap();
+                    match ret {
+                        Entry::Usize(addr) => {
+                            self.frame_mut().ip = *addr;
+                        }
+                        x => {
+                            dbg!(&self.to_value(*x));
+                            unreachable!()
+                        }
+                    }
+
                     self.stack.push(result);
+
                     continue;
                 }
 
                 Op::Call => {
-                    let _arg_len = self.next_byte();
                     let entry = self.stack.pop().unwrap();
-
-                    self.push_callframe(entry, 2);
+                    self.push_callframe(entry);
                     continue;
 
                     //todo support native functions by matching on entry
-
-                    offset = 1;
                 }
 
                 Op::Collect => {

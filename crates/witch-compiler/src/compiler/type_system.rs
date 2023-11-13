@@ -229,7 +229,6 @@ impl TypeSystem {
 mod tests {
 
     use super::*;
-    
 
     #[test]
     fn it_resolves_generics() {

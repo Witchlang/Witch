@@ -379,10 +379,9 @@ impl Type {
                     {
                         return false;
                     // Property does not have a corresponding method or field
-                    } else {
-                        return false;
-                    }
+                    } 
                 }
+                return true;
             }
             _ => {
                 for (name, ty) in properties.iter() {
