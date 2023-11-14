@@ -5,11 +5,14 @@ mod type_system;
 mod util;
 use std::collections::HashMap;
 use std::ops::Range;
+use std::path::PathBuf;
 
 use crate::error::{Error, Result};
+use crate::resolve_file;
 use context::{Context, Scope};
 use witch_parser::ast::{Ast, Key, Operator};
 use witch_parser::types::{Type, TypeDecl};
+use witch_parser::Parser;
 use witch_runtime::value::{Function, Value};
 use witch_runtime::vm::Op;
 
@@ -46,6 +49,7 @@ pub fn compile<'a>(ctx: &mut Context, ast: &Ast) -> Result<(Vec<u8>, Type)> {
             else_,
             span: _,
         } => if_(ctx, predicate, then_, else_)?,
+        Ast::Import { path, span } => import(ctx, path, span)?,
         Ast::Infix { lhs, op, rhs, .. } => infix(ctx, lhs, op, rhs)?,
         Ast::Let {
             ident,
@@ -247,13 +251,6 @@ fn call(ctx: &mut Context, expr: &Box<Ast>, args: &Vec<Ast>) -> Result<(Vec<u8>,
                         wanted_type, supplied_type
                     );
                 }
-
-                if resolved_wanted_type.requires_binding() {
-                    ctx.scope()?
-                        .bindings
-                        .last_mut()
-                        .map(|m| m.insert(resolved_wanted_type, supplied_type.clone()));
-                }
             }
 
             bytecode.append(&mut bc);
@@ -399,6 +396,11 @@ fn if_(
     bytecode.append(&mut else_bytecode);
 
     Ok((bytecode, Type::Void))
+}
+
+fn import(ctx: &mut Context, path: &PathBuf, _span: &Range<usize>) -> Result<(Vec<u8>, Type)> {
+    dbg!(&ctx.resolve_import(path.clone()));
+    Ok((vec![], Type::Unknown))
 }
 
 /// Expresses a binary operation such as 1 + 1, a == b, 9 > 8, etc.

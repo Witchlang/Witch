@@ -91,7 +91,7 @@ pub enum Kind {
     KwLet,
     #[token("new")]
     KwNew,
-    #[regex(r#"import ((?&ident)|/)+"#)]
+    #[regex(r#"import"#)]
     KwImport,
     #[token("if")]
     KwIf,

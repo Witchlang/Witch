@@ -1,6 +1,9 @@
 use super::{type_system::TypeSystem, LocalVariable};
 use crate::error::{Error, Result};
-use std::collections::HashMap;
+use std::{
+    ffi::OsStr,
+    path::{Component, PathBuf},
+};
 use witch_parser::{types::Type, Ast};
 use witch_runtime::vm::Op;
 
@@ -15,12 +18,6 @@ pub struct Upvalue {
 #[derive(Debug, Default, Clone)]
 pub struct Scope {
     pub locals: Vec<LocalVariable>,
-    pub types: HashMap<String, Type>,
-
-    /// A stack of bindings of concrete types to type variable names
-    pub bindings: Vec<HashMap<Type, Type>>,
-    /// Generic constraints for this scope, if any
-    pub generics: HashMap<String, Type>,
     pub upvalues: Vec<Upvalue>,
 }
 
@@ -58,6 +55,8 @@ pub struct Cached {
 
 #[derive(Debug, Clone)]
 pub struct Context {
+    pub root_path: PathBuf,
+
     /// Holds the type system
     pub ts: TypeSystem,
 
@@ -80,9 +79,10 @@ pub struct Context {
     pub value_cache: Vec<Cached>,
 }
 
-impl Default for Context {
-    fn default() -> Self {
+impl Context {
+    pub fn new(root_path: PathBuf) -> Self {
         Self {
+            root_path,
             ts: TypeSystem::new(),
             scopes: vec![Scope::default()],
             lineage: Default::default(),
@@ -93,9 +93,30 @@ impl Default for Context {
             value_cache: Default::default(),
         }
     }
-}
 
-impl Context {
+    pub fn resolve_import(&mut self, mut path: PathBuf) {
+        if !path.ends_with(".witch") {
+            path.set_extension("witch");
+        }
+
+        // Deduce whether path is relative local or abstract
+        // - If it starts with `witch`, it's the std library
+        // - If it starts with ./, its local
+        // - If it just starts with an identifier, its a package
+        let module_file_path = match path.components().next() {
+            Some(Component::Normal(x)) => todo!("{:?}", x),
+            Some(Component::CurDir) => self.root_path.parent().unwrap().join(path).canonicalize(),
+            _ => panic!("very bad module path"),
+        };
+        dbg!(&module_file_path);
+
+        // Parse the file into an Ast::Module, holding a map between symbol names and their asts, as well as imports.
+
+        // Add the module as a variable in the local scope
+
+        // On member access, look up the symbols table in the module ast and compile it using a new context
+    }
+
     pub fn scope(&mut self) -> Result<&mut Scope> {
         self.scopes.last_mut().ok_or(Error::fatal())
     }
@@ -193,25 +214,6 @@ impl Context {
         let len: [u8; std::mem::size_of::<usize>()] = len.to_ne_bytes();
         bc.append(&mut len.to_vec());
         bc
-    }
-
-    /// Adds a value bytecode to the cache, unless it has already been cached
-    /// before. Whether the cached value has been flushed in a previous script
-    /// has no bearing on the cached entry index.
-    pub fn cache_value(&mut self, value_bytecode: Vec<u8>) -> usize {
-        if let Some(idx) = self
-            .value_cache
-            .iter()
-            .position(|cached| &cached.bytecode == &value_bytecode)
-        {
-            idx
-        } else {
-            self.value_cache.push(Cached {
-                bytecode: value_bytecode,
-                flushed: false,
-            });
-            self.value_cache.len() - 1
-        }
     }
 
     /// Adds a fn bytecode to the cache, unless it has already been cached

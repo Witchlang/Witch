@@ -1,0 +1,3 @@
+import ./sub_module
+
+sub_module.public_function()

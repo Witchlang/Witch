@@ -27,13 +27,13 @@ mod error;
 
 /// Takes a Witch source file and compiles it to bytecode, or returns `error::Error`.
 pub fn compile(file_path: PathBuf, maybe_ctx: Option<Context>) -> Result<(Vec<u8>, Context)> {
-    let (_root_path, source) = resolve_file(None, file_path)?;
+    let (root_path, source) = resolve_file(None, file_path)?;
     let mut parser = Parser::new(&source);
     let ast = parser.file().unwrap();
 
     // If no context is provided, create a new one and compile the prelude for it
     let mut ctx = maybe_ctx.unwrap_or_else(|| {
-        let mut ctx = Context::default();
+        let mut ctx = Context::new(root_path);
         let (prelude, _) = compiler::compile(&mut ctx, &witch_std::prelude()).unwrap();
         ctx.prelude = Some(prelude);
         ctx

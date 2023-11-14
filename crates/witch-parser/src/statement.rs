@@ -1,4 +1,5 @@
-use std::path::PathBuf;
+use std::ffi::{OsStr, OsString};
+use std::path::{Component, PathBuf};
 
 use crate::error::Result;
 use crate::lexer::{Kind, Lexer};
@@ -16,10 +17,16 @@ pub fn statement<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<Ast> {
     let stmt = match p.peek() {
         Some(Kind::RBrace) => Ast::Nop,
         Some(Kind::KwImport) => {
-            let token = p.consume(&Kind::KwImport)?;
+            p.consume(&Kind::KwImport)?;
+
+            let path = build_path(p, vec![])?.iter().collect::<PathBuf>();
+
+            //maybe starts with period
+            // then recursive to build path with separators
+
             let stmt = Ast::Import {
-                path: Box::new(PathBuf::from(p.text(&token))),
-                span: token.span,
+                path: Box::new(path),
+                span: start..p.cursor,
             };
             let end = p.cursor;
             Ast::Statement {
@@ -158,6 +165,38 @@ pub fn statement<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<Ast> {
         p.consume(&Kind::Semicolon)?;
     }
     Ok(stmt)
+}
+
+fn build_path<'input>(
+    p: &mut Parser<'input, Lexer<'input>>,
+    mut components: Vec<OsString>,
+) -> Result<Vec<OsString>> {
+    match p.peek() {
+        Some(Kind::Dot) => {
+            p.consume(&Kind::Dot)?;
+            components.push(OsString::from("."));
+            build_path(p, components)
+        }
+
+        Some(Kind::Slash) => {
+            p.consume(&Kind::Slash)?;
+            build_path(p, components)
+        }
+
+        Some(Kind::Ident) => {
+            let token = p.consume(&Kind::Ident)?;
+            let component = OsString::from(p.text(&token));
+            components.push(component);
+            build_path(p, components)
+        }
+
+        Some(Kind::Semicolon) => {
+            p.consume(&Kind::Semicolon)?;
+            Ok(components)
+        }
+
+        _ => panic!("oops"),
+    }
 }
 
 fn assignment<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<(Option<Type>, Ast)> {

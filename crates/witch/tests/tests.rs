@@ -32,6 +32,22 @@ fn fib() {
 
 #[cfg(feature = "compiler")]
 #[test]
+fn modules() {
+    use std::path::PathBuf;
+
+    use witch::Vm;
+    use witch_compiler::compile;
+    use witch_runtime::value::Value;
+
+    let expected = Value::String("Hello from module".into());
+    let (bytecode, _) = compile(PathBuf::from("tests/fixtures/module.witch"), None).unwrap();
+    let mut vm = Vm::new();
+    let result = vm.run(bytecode).unwrap();
+    assert_eq!(expected, result);
+}
+
+#[cfg(feature = "compiler")]
+#[test]
 fn lambdas() {
     use std::path::PathBuf;
 
