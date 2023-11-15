@@ -9,6 +9,7 @@
 //!
 //!
 use crate::error::{Error, Result};
+use anyhow::anyhow;
 use std::collections::HashMap;
 use witch_parser::types::Type;
 
@@ -149,7 +150,7 @@ impl TypeSystem {
 
                 return self.types.get(&name).cloned().ok_or_else(|| {
                     dbg!(name);
-                    Error::fatal()
+                    anyhow!(Error::fatal())
                 });
             }
 

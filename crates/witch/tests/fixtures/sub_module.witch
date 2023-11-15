@@ -2,10 +2,10 @@ function private_function() -> string {
     return "Hello from module"
 }
 
-pub struct Foo {
+struct Foo {
     greeting: string
 }
 
-pub function public_function() -> Foo {
-    return new Foo { data: private_function() }
+function public_function() -> Foo {
+    return new Foo { greeting: private_function() }
 }

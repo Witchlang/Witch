@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::heap::Heap;
 use crate::stack::{Entry, Function as StackFunction, Pointer, Stack};
-use crate::value::{Function, Value};
+use crate::value::{Value};
 
 #[derive(Debug)]
 enum Upvalue {
@@ -65,6 +65,7 @@ impl core::convert::From<u8> for InfixOp {
 pub enum Op {
     SetupValueCache,
     SetupFunctionCache,
+    GetModuleSymbol,
     GetValue,
     GetFunction,
 
@@ -93,25 +94,26 @@ impl core::convert::From<u8> for Op {
         match byte {
             0 => Op::SetupValueCache,
             1 => Op::SetupFunctionCache,
-            2 => Op::GetValue,
-            3 => Op::GetFunction,
+            2 => Op::GetModuleSymbol,
+            3 => Op::GetValue,
+            4 => Op::GetFunction,
 
-            4 => Op::Push,
-            5 => Op::Get,
-            6 => Op::GetUpvalue,
-            7 => Op::GetMember,
-            8 => Op::Set,
-            9 => Op::SetProperty,
+            5 => Op::Push,
+            6 => Op::Get,
+            7 => Op::GetUpvalue,
+            8 => Op::GetMember,
+            9 => Op::Set,
+            10 => Op::SetProperty,
 
-            10 => Op::SetReturn,
-            11 => Op::Jump,
-            12 => Op::JumpIfFalse,
+            11 => Op::SetReturn,
+            12 => Op::Jump,
+            13 => Op::JumpIfFalse,
 
-            13 => Op::Binary,
-            14 => Op::Return,
-            15 => Op::Call,
+            14 => Op::Binary,
+            15 => Op::Return,
+            16 => Op::Call,
 
-            16 => Op::Collect,
+            17 => Op::Collect,
 
             _ => Op::Crash,
         }
@@ -130,6 +132,8 @@ pub struct Vm {
     stack: Stack,
     heap: Heap,
     frames: Vec<CallFrame>,
+
+    modules: Vec<Stack>,
 
     /// The bytecode of the current callframe. Only used for lookups (next N bytes, etc..)
     bytecode: Vec<u8>,
@@ -155,6 +159,7 @@ impl Vm {
         Self {
             stack: Stack::new(),
             heap: Heap::default(),
+            modules: vec![],
             frames: vec![],
             bytecode: vec![],
             functions: vec![],
@@ -357,6 +362,14 @@ impl Vm {
                         }
                     }
                     offset = 8;
+                }
+
+                Op::GetModuleSymbol => {
+                    let [module_idx, local_idx] = self.next_two_bytes();
+                    offset = 2;
+
+                    self.stack
+                        .push(self.modules[module_idx as usize].get(local_idx as usize));
                 }
 
                 Op::GetFunction => {

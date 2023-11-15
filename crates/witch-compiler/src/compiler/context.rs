@@ -1,10 +1,13 @@
 use super::{type_system::TypeSystem, LocalVariable};
-use crate::error::{Error, Result};
+use crate::{
+    error::{Error, Result},
+};
+use anyhow::anyhow;
+use anyhow::Context as ErrorContext;
 use std::{
-    ffi::OsStr,
     path::{Component, PathBuf},
 };
-use witch_parser::{types::Type, Ast};
+use witch_parser::{types::Type, Ast, Parser};
 use witch_runtime::vm::Op;
 
 #[derive(Debug, Clone)]
@@ -54,8 +57,29 @@ pub struct Cached {
 }
 
 #[derive(Debug, Clone)]
+pub struct Module {
+    pub path: PathBuf,
+    pub context: Context,
+    pub bytecode: Vec<u8>,
+}
+
+impl Module {
+    pub fn name(&self) -> String {
+        self.path.file_stem().unwrap().to_string_lossy().to_string()
+    }
+
+    pub fn r#type(&self) -> Type {
+        Type::Module {
+            path: self.path.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Context {
     pub root_path: PathBuf,
+
+    pub imports: Vec<Module>,
 
     /// Holds the type system
     pub ts: TypeSystem,
@@ -83,6 +107,7 @@ impl Context {
     pub fn new(root_path: PathBuf) -> Self {
         Self {
             root_path,
+            imports: vec![],
             ts: TypeSystem::new(),
             scopes: vec![Scope::default()],
             lineage: Default::default(),
@@ -94,35 +119,67 @@ impl Context {
         }
     }
 
-    pub fn resolve_import(&mut self, mut path: PathBuf) {
+    pub fn get_module(&self, path: &PathBuf) -> Option<(usize, Module)> {
+        self.imports
+            .iter()
+            .position(|m| &m.path == path)
+            .map(|idx| (idx, self.imports[idx].clone()))
+    }
+
+    /// Handles importing of other Witch modules
+    ///
+    pub fn resolve_import(&mut self, mut path: PathBuf) -> Result<Module> {
         if !path.ends_with(".witch") {
             path.set_extension("witch");
         }
 
-        // Deduce whether path is relative local or abstract
+        // Bail early if this module is already imported
+        if let Some(module) = self.imports.iter().find(|m| m.path == path) {
+            return Ok(module.clone());
+        }
+
+        // Deduce whether path is relative to the entry module or abstract
         // - If it starts with `witch`, it's the std library
         // - If it starts with ./, its local
-        // - If it just starts with an identifier, its a package
+        // - If it just starts with an identifier, its a Grimoire package (TODO)
         let module_file_path = match path.components().next() {
             Some(Component::Normal(x)) => todo!("{:?}", x),
             Some(Component::CurDir) => self.root_path.parent().unwrap().join(path).canonicalize(),
             _ => panic!("very bad module path"),
+        }
+        .expect("oh no");
+
+        let source = std::fs::read_to_string(module_file_path.clone()).with_context(|| {
+            format!(
+                "Failed to read file {}",
+                module_file_path.clone().to_string_lossy()
+            )
+        })?;
+
+        let mut parser = Parser::new(&source);
+        let module_ast = parser.file().expect("module parser error");
+
+        let mut module_context = Context::new(module_file_path.clone());
+        let (module_bytecode, _) = crate::compiler::compile(&mut module_context, &module_ast)?;
+
+        let module = Module {
+            path: module_file_path,
+            context: module_context,
+            bytecode: module_bytecode,
         };
-        dbg!(&module_file_path);
+        self.imports.push(module.clone());
 
-        // Parse the file into an Ast::Module, holding a map between symbol names and their asts, as well as imports.
-
-        // Add the module as a variable in the local scope
-
-        // On member access, look up the symbols table in the module ast and compile it using a new context
+        Ok(module)
     }
 
     pub fn scope(&mut self) -> Result<&mut Scope> {
-        self.scopes.last_mut().ok_or(Error::fatal())
+        self.scopes.last_mut().ok_or(anyhow!(Error::fatal()))
     }
 
     pub fn scope_by_index(&mut self, scope_idx: usize) -> Result<&mut Scope> {
-        self.scopes.get_mut(scope_idx).ok_or(Error::fatal())
+        self.scopes
+            .get_mut(scope_idx)
+            .ok_or(anyhow!(Error::fatal()))
     }
 
     pub fn get_type(&self, name: &str) -> Type {
@@ -133,7 +190,7 @@ impl Context {
     pub fn add_type(&mut self, name: String, typ: Type) -> Result<()> {
         if self.scopes.len() > 1 {
             dbg!("attempted to add type in non-root scope");
-            return Err(Error::fatal());
+            return Err(anyhow!(Error::fatal()));
         }
         self.ts.add_type(name, typ)
     }

@@ -1,5 +1,5 @@
-use std::ffi::{OsStr, OsString};
-use std::path::{Component, PathBuf};
+use std::ffi::{OsString};
+use std::path::{PathBuf};
 
 use crate::error::Result;
 use crate::lexer::{Kind, Lexer};
@@ -20,9 +20,6 @@ pub fn statement<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<Ast> {
             p.consume(&Kind::KwImport)?;
 
             let path = build_path(p, vec![])?.iter().collect::<PathBuf>();
-
-            //maybe starts with period
-            // then recursive to build path with separators
 
             let stmt = Ast::Import {
                 path: Box::new(path),

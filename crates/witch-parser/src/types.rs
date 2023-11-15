@@ -1,6 +1,7 @@
 use core::hash::{Hash, Hasher};
 use core::mem::discriminant;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use witch_runtime::value::Value;
 
 use crate::ast::{Ast, Operator};
@@ -164,6 +165,10 @@ pub enum Type {
     /// A type that merges multiple types into one.
     /// This allows us to compare type T to U: InterfaceOne + InterfaceTwo, etc
     Intersection(Vec<Type>),
+
+    Module {
+        path: PathBuf,
+    },
 
     /// An unknown type is one that we haven't yet inferred, or are unable to do so
     Unknown,

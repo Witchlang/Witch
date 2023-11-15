@@ -7,12 +7,12 @@ use std::collections::HashMap;
 use std::ops::Range;
 use std::path::PathBuf;
 
-use crate::error::{Error, Result};
-use crate::resolve_file;
+use crate::error::{Result};
+
 use context::{Context, Scope};
 use witch_parser::ast::{Ast, Key, Operator};
 use witch_parser::types::{Type, TypeDecl};
-use witch_parser::Parser;
+
 use witch_runtime::value::{Function, Value};
 use witch_runtime::vm::Op;
 
@@ -399,7 +399,17 @@ fn if_(
 }
 
 fn import(ctx: &mut Context, path: &PathBuf, _span: &Range<usize>) -> Result<(Vec<u8>, Type)> {
-    dbg!(&ctx.resolve_import(path.clone()));
+    // Make sure the module is available to us
+    let module = ctx.resolve_import(path.clone())?;
+
+    // Add the module as a local variable in the current scope
+    ctx.scope()?.locals.push(LocalVariable {
+        name: module.name(),
+        is_captured: false,
+        r#type: module.r#type(),
+    });
+
+    dbg!(&module.name());
     Ok((vec![], Type::Unknown))
 }
 
@@ -476,7 +486,7 @@ fn member(
                 bytecode.push(Op::GetMember as u8);
                 bytecode.push(1_u8);
                 bytecode.push(*idx as u8);
-                return Ok((bytecode, *ty.clone()));
+                Ok((bytecode, *ty.clone()))
             }
             Key::Expression(expr) => {
                 let (mut key_bytecode, key_type) = compile(ctx, expr)?;
@@ -486,9 +496,34 @@ fn member(
                 bytecode.append(&mut key_bytecode);
                 bytecode.push(Op::GetMember as u8);
                 bytecode.push(0_u8);
-                return Ok((bytecode, Type::Unknown));
+                Ok((bytecode, Type::Unknown))
             }
             x => todo!("{:?}", x),
+        },
+
+        Type::Module { path } => match key {
+            Key::String(ident) => {
+                // Get the module from ctx
+                if let Some((module_idx, mut module)) = ctx.get_module(&path) {
+                    // Find a local by ident
+                    let (local_idx, local) = module
+                        .context
+                        .scope()?
+                        .locals
+                        .iter()
+                        .enumerate()
+                        .find(|(_idx, local)| &local.name == ident)
+                        .expect("local variable not found in module");
+                    // emit GetModuleSymbol, module index, local index
+                    bytecode.push(Op::GetModuleSymbol as u8);
+                    bytecode.push(module_idx as u8);
+                    bytecode.push(local_idx as u8);
+                    Ok((bytecode, local.r#type.clone()))
+                } else {
+                    panic!("unknown module {:?}", path);
+                }
+            }
+            _ => panic!("cant retrieve module symbol by kkey other than string"),
         },
 
         // TODO this can probably be handled in a nicer way than being hardcoded here...
@@ -497,7 +532,7 @@ fn member(
                 let (mut key_bytecode, _key_type) = compile(ctx, expr)?;
                 bytecode.push(Op::GetMember as u8);
                 bytecode.append(&mut key_bytecode);
-                return Ok((bytecode, Type::Unknown));
+                Ok((bytecode, Type::Unknown))
             }
             x => todo!("{:?}", x),
         },
