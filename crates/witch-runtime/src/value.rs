@@ -10,6 +10,12 @@ pub enum Value {
     String(String),
     List(Vec<Self>),
     Function(Function),
+    StackFunction {
+        //TODO terrible name
+        addr: usize,
+        arity: usize,
+        upvalues_refs_idx: usize,
+    },
     I8(i8),
     U8(u8),
     I16(i16),

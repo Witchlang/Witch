@@ -89,6 +89,15 @@ impl Stack {
         self.data[idx] = entry;
     }
 
+    pub fn take(&mut self, n: usize) -> Vec<Entry> {
+        let mut taken = vec![];
+        for _ in 0..n {
+            taken.push(self.data.pop().unwrap());
+        }
+        taken.reverse();
+        taken
+    }
+
     pub fn len(&self) -> usize {
         self.data.len()
     }

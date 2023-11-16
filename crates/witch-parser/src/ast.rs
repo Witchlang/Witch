@@ -13,11 +13,6 @@ pub enum Key {
     Expression(Box<Ast>),
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct Module {
-    pub symbols: HashMap<String, Ast>,
-}
-
 #[repr(u8)]
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum Operator {

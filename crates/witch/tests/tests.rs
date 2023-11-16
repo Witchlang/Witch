@@ -8,7 +8,7 @@ fn basic() {
     use witch_runtime::value::Value;
 
     let expected = Value::String("HelloHelloHello".to_string());
-    let (bytecode, _) = compile(PathBuf::from("tests/fixtures/basic.witch"), None).unwrap();
+    let bytecode = compile(PathBuf::from("tests/fixtures/basic.witch")).unwrap();
     let mut vm = Vm::new();
     let result = vm.run(bytecode).unwrap();
     assert_eq!(expected, result);
@@ -24,7 +24,7 @@ fn fib() {
     use witch_runtime::value::Value;
 
     let expected = Value::Usize(55);
-    let (bytecode, _) = compile(PathBuf::from("tests/fixtures/fib.witch"), None).unwrap();
+    let bytecode = compile(PathBuf::from("tests/fixtures/fib.witch")).unwrap();
     let mut vm = Vm::new();
     let result = vm.run(bytecode).unwrap();
     assert_eq!(expected, result);
@@ -40,7 +40,7 @@ fn modules() {
     use witch_runtime::value::Value;
 
     let expected = Value::String("Hello from module".into());
-    let (bytecode, _) = compile(PathBuf::from("tests/fixtures/module.witch"), None).unwrap();
+    let bytecode = compile(PathBuf::from("tests/fixtures/module.witch")).unwrap();
     let mut vm = Vm::new();
     let result = vm.run(bytecode).unwrap();
     assert_eq!(expected, result);
@@ -56,7 +56,7 @@ fn lambdas() {
     use witch_runtime::value::Value;
 
     let expected = Value::Usize(5);
-    let (bytecode, _) = compile(PathBuf::from("tests/fixtures/lambda.witch"), None).unwrap();
+    let bytecode = compile(PathBuf::from("tests/fixtures/lambda.witch")).unwrap();
     let mut vm = Vm::new();
     let result = vm.run(bytecode).unwrap();
     assert_eq!(expected, result);
@@ -72,7 +72,7 @@ fn closures() {
     use witch_runtime::value::Value;
 
     let expected = Value::Usize(30);
-    let (bytecode, _) = compile(PathBuf::from("tests/fixtures/closures.witch"), None).unwrap();
+    let bytecode = compile(PathBuf::from("tests/fixtures/closures.witch")).unwrap();
     let mut vm = Vm::new();
     let result = vm.run(bytecode).unwrap();
     assert_eq!(expected, result);
@@ -88,7 +88,7 @@ fn lists() {
     use witch_runtime::value::Value;
 
     let expected = Value::Usize(3);
-    let (bytecode, _) = compile(PathBuf::from("tests/fixtures/lists.witch"), None).unwrap();
+    let bytecode = compile(PathBuf::from("tests/fixtures/lists.witch")).unwrap();
     let mut vm = Vm::new();
     let result = vm.run(bytecode).unwrap();
     assert_eq!(expected, result);
@@ -104,7 +104,7 @@ fn types() {
     use witch_runtime::value::Value;
 
     let expected = Value::Usize(3);
-    let (bytecode, _) = compile(PathBuf::from("tests/fixtures/types.witch"), None).unwrap();
+    let bytecode = compile(PathBuf::from("tests/fixtures/types.witch")).unwrap();
     let mut vm = Vm::new();
     let result = vm.run(bytecode).unwrap();
     assert_eq!(expected, result);

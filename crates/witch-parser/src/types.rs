@@ -109,6 +109,9 @@ pub enum Type {
         /// Whether the function is variadic, i.e. if it takes a variable number of arguments
         is_variadic: bool,
 
+        /// Whether the function is defined as a struct method (with implicit self as first argument)
+        is_method: bool,
+
         /// A hashmap of defined type variables, e.g. <T, U>(arg: U) -> T {}
         generics: Vec<(String, Self)>,
     },
@@ -330,6 +333,7 @@ impl From<&Ast> for Type {
                 returns: Box::new(returns.clone()),
                 is_variadic: *is_variadic,
                 generics: generics.clone(),
+                is_method: false,
             },
             x => {
                 dbg!(x);
@@ -417,6 +421,7 @@ impl Type {
                     returns: Box::new(Type::Usize),
                     is_variadic: false,
                     generics: vec![],
+                    is_method: true,
                 },
                 0,
             ),

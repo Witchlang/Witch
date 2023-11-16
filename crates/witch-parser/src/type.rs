@@ -353,6 +353,7 @@ fn function_signature<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<T
         returns,
         is_variadic,
         generics,
+        is_method: false,
     })
 }
 

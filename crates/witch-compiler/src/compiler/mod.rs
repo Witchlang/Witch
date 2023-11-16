@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::ops::Range;
 use std::path::PathBuf;
 
-use crate::error::{Result};
+use crate::error::Result;
 
 use context::{Context, Scope};
 use witch_parser::ast::{Ast, Key, Operator};
@@ -18,11 +18,11 @@ use witch_runtime::vm::Op;
 
 /// Contains all compile-time information about a locally scoped
 /// variable.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LocalVariable {
-    name: String,
-    is_captured: bool,
-    r#type: Type,
+    pub name: String,
+    pub is_captured: bool,
+    pub r#type: Type,
 }
 
 /// Turns an AST into bytecode
@@ -73,6 +73,7 @@ pub fn compile<'a>(ctx: &mut Context, ast: &Ast) -> Result<(Vec<u8>, Type)> {
         Ast::Type { name, decl, span } => decl_type(ctx, name, decl, span)?,
         Ast::Value(v) => value(ctx, v)?,
         Ast::Var(ident) => var(ctx, ident)?,
+        Ast::Nop => (vec![], Type::Void),
         x => todo!("{:?}", x),
     };
 
@@ -104,7 +105,12 @@ fn assignment(
     let (mut expr_bytes, expr_type) = compile(ctx, rhs)?;
 
     if let Some((local_variable, local)) = ctx.scope()?.get_local(&ident) {
-        if let Ok(local_variable) = u8::try_from(local_variable) {
+        let offset = if ctx.scopes.len() == 1 {
+            ctx.stack_offset()
+        } else {
+            0
+        };
+        if let Ok(local_variable) = u8::try_from(offset + local_variable) {
             let var_type = ctx.ts.resolve(local.r#type.clone())?;
 
             match (member_key, &var_type) {
@@ -166,23 +172,30 @@ fn call(ctx: &mut Context, expr: &Box<Ast>, args: &Vec<Ast>) -> Result<(Vec<u8>,
     let mut bytecode = vec![];
     let mut arity = args.len();
 
-    // If this is being called on a Member expression, that means a method call.
-    // Method call means we have an implicit `self` variable as a first argument.
-    // Let's stick the Entry object on the stack before the arguments then.
-    if let Ast::Member { container, .. } = *expr.clone() {
-        let (mut bc, _) = compile(ctx, &container)?;
-        bytecode.append(&mut bc);
-        arity += 1;
-    }
-
+    let mut args_bytecode = vec![];
     let mut args_with_types = vec![];
     for arg in args.iter() {
         let (mut bc, arg_type) = compile(ctx, arg)?;
-        bytecode.append(&mut bc);
+        args_bytecode.append(&mut bc);
         args_with_types.push((arg.clone(), arg_type));
     }
 
     let (mut bc, mut called_type) = compile(ctx, expr)?;
+
+    // If this is being called on a Member expression, that means a method call.
+    // Method call means we have an implicit `self` variable as a first argument.
+    // Let's stick the Entry object on the stack before the arguments then.
+    if let Ast::Member { container, .. } = *expr.clone() {
+        if let Type::Function { is_method, .. } = &called_type {
+            if *is_method {
+                let (mut self_bc, ty) = compile(ctx, &container)?;
+                bytecode.append(&mut self_bc);
+                arity += 1;
+            }
+        }
+    }
+
+    bytecode.append(&mut args_bytecode);
 
     // This handles the recursion edge case. When we're calling a function recursively, it's not actually bound to the
     // variable name at the time of compiling the function body, so the variable we're calling is undefined at this point.
@@ -209,6 +222,7 @@ fn call(ctx: &mut Context, expr: &Box<Ast>, args: &Vec<Ast>) -> Result<(Vec<u8>,
             is_variadic,
             returns,
             generics,
+            is_method,
         } => {
             ctx.push_type_scope(&generics);
 
@@ -288,11 +302,22 @@ fn function(
 ) -> Result<(Vec<u8>, Type)> {
     ctx.push_type_scope(generics);
 
+    let is_method = if let Ast::Type {
+        decl: TypeDecl::Struct { .. },
+        ..
+    } = &ctx.lineage[ctx.lineage.len() - 2]
+    {
+        true
+    } else {
+        false
+    };
+
     let ty = Type::Function {
         args: args.iter().map(|a| a.1.clone()).collect(),
         returns: Box::new(returns.clone()),
         is_variadic: *is_variadic,
         generics: generics.clone(),
+        is_method,
     };
 
     let mut arity = args.len();
@@ -331,13 +356,20 @@ fn function(
     let (func_bytecode, _actually_returns) = compile(ctx, body)?;
 
     let mut upvalues_bytecode = vec![];
+    // If the parent scope is the root scope (i.e. we have a scope len of 2), take the previous modules stacks into account for the
+    // location this upvalue is pointing to
+    let offset = if ctx.scopes.len() == 2 {
+        ctx.stack_offset()
+    } else {
+        0
+    };
     ctx.scope()?.upvalues.clone().iter().for_each(|u| {
         if u.is_local {
             upvalues_bytecode.push(1_u8);
         } else {
             upvalues_bytecode.push(0_u8);
         }
-        upvalues_bytecode.push(u.index as u8); // todo allow largers size here?
+        upvalues_bytecode.push((offset + u.index) as u8); // todo allow largers size here?
     });
 
     ctx.scopes.pop();
@@ -399,17 +431,17 @@ fn if_(
 }
 
 fn import(ctx: &mut Context, path: &PathBuf, _span: &Range<usize>) -> Result<(Vec<u8>, Type)> {
+    panic!("DEPRECATED??");
     // Make sure the module is available to us
-    let module = ctx.resolve_import(path.clone())?;
+    //let module = ctx.resolve_import(path.clone())?;
 
     // Add the module as a local variable in the current scope
-    ctx.scope()?.locals.push(LocalVariable {
-        name: module.name(),
-        is_captured: false,
-        r#type: module.r#type(),
-    });
+    // ctx.scope()?.locals.push(LocalVariable {
+    //     name: module.name(),
+    //     is_captured: false,
+    //     r#type: module.r#type(),
+    // });
 
-    dbg!(&module.name());
     Ok((vec![], Type::Unknown))
 }
 
@@ -470,7 +502,7 @@ fn member(
                 for (name, (ty, idx)) in methods.iter() {
                     if name == key {
                         bytecode.push(Op::GetFunction as u8);
-                        bytecode.push(*idx as u8);
+                        bytecode.push((ctx.vtable_offset() + *idx) as u8);
                         return Ok((bytecode, ty.clone()));
                     }
                 }
@@ -504,21 +536,17 @@ fn member(
         Type::Module { path } => match key {
             Key::String(ident) => {
                 // Get the module from ctx
-                if let Some((module_idx, mut module)) = ctx.get_module(&path) {
-                    // Find a local by ident
-                    let (local_idx, local) = module
-                        .context
-                        .scope()?
-                        .locals
-                        .iter()
-                        .enumerate()
-                        .find(|(_idx, local)| &local.name == ident)
-                        .expect("local variable not found in module");
-                    // emit GetModuleSymbol, module index, local index
-                    bytecode.push(Op::GetModuleSymbol as u8);
-                    bytecode.push(module_idx as u8);
-                    bytecode.push(local_idx as u8);
-                    Ok((bytecode, local.r#type.clone()))
+                if let Some(module) = ctx.get_module(&path) {
+                    for (i, local) in module.locals.iter().enumerate() {
+                        if local.name == *ident {
+                            if let Ok(idx) = u8::try_from(module.stack_offset + i) {
+                                let return_type = local.r#type.clone();
+                                return Ok((vec![Op::Get as u8, idx], return_type));
+                            }
+                            unreachable!()
+                        }
+                    }
+                    panic!("unknown variable in module {:?}", path);
                 } else {
                     panic!("unknown module {:?}", path);
                 }
@@ -531,6 +559,7 @@ fn member(
             Key::Expression(expr) => {
                 let (mut key_bytecode, _key_type) = compile(ctx, expr)?;
                 bytecode.push(Op::GetMember as u8);
+                panic!();
                 bytecode.append(&mut key_bytecode);
                 Ok((bytecode, Type::Unknown))
             }
@@ -561,10 +590,27 @@ fn statement(
         } else {
             Type::Void
         };
+
         return Ok((bytecode, return_type));
     }
 
     let (mut bytecode, _) = compile(ctx, &stmt)?;
+
+    // If the statement is not an assigment or declaration, pop it off the stack afterwards
+    if !matches!(
+        *stmt,
+        Ast::Let { .. }
+            | Ast::Assignment { .. }
+            | Ast::Type { .. }
+            | Ast::Block(_)
+            | Ast::If { .. }
+            | Ast::Break
+            | Ast::Continue
+            | Ast::While { .. }
+    ) {
+        bytecode.push(Op::Pop as u8);
+    }
+
     let (mut rest_bytecode, ty) = compile(ctx, &rest)?;
     bytecode.append(&mut rest_bytecode);
     Ok((bytecode, ty))
@@ -684,7 +730,16 @@ fn decl_type(
                         let vtable_idx = ctx.cache_fn(vec![]);
                         method_vtable_idxs.insert(name.clone(), vtable_idx);
 
-                        (name.clone(), (ast.into(), vtable_idx))
+                        // The AST dont know whether the function is a method or not. Make sure it is.
+                        let mut mtype = ast.into();
+                        if let Type::Function {
+                            ref mut is_method, ..
+                        } = mtype
+                        {
+                            *is_method = true;
+                        }
+
+                        (name.clone(), (mtype, vtable_idx))
                     })
                     .collect(),
                 generics: generics.clone(),
@@ -812,10 +867,30 @@ fn var(ctx: &mut Context, ident: &String) -> Result<(Vec<u8>, Type)> {
     let mut local_variable = None;
 
     // First check all variables local to us
+    // If we're in the global scope, we need to take the module's stack offset into account. If not, the position is relative
+    // to the current functions stack_start, based on its arity and where its called
+    let offset = if ctx.scopes.len() == 1 {
+        ctx.stack_offset()
+    } else {
+        0
+    };
     for (i, local) in ctx.scope()?.locals.iter().enumerate() {
         if local.name == *ident {
-            local_variable = Some((i, local));
+            local_variable = Some((offset + i, local.to_owned()));
             break;
+        }
+    }
+
+    // If not found, check the <prelude> module as well. It has no stack offset since its.. the prelude.
+    if local_variable.is_none() {
+        let prelude = ctx
+            .get_module(&PathBuf::from("<prelude>"))
+            .expect("what no prelude");
+        for (i, local) in prelude.locals.iter().enumerate() {
+            if local.name == *ident {
+                local_variable = Some((i, local.to_owned()));
+                break;
+            }
         }
     }
 

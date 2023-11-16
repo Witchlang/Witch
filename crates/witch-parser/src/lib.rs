@@ -5,7 +5,9 @@
 #![feature(iter_advance_by)]
 #![feature(assert_matches)]
 #![feature(let_chains)]
+use std::collections::HashMap;
 use std::iter::Peekable;
+use std::path::PathBuf;
 
 use logos::Span;
 
@@ -23,6 +25,13 @@ mod expression;
 mod statement;
 mod r#type;
 pub mod types;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Module {
+    pub path: PathBuf,
+    pub ast: ast::Ast,
+    pub imports: HashMap<PathBuf, Self>,
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Spanned<T>((T, Span));
@@ -105,15 +114,12 @@ impl<'input> Parser<'input, Lexer<'input>> {
         Ok(token)
     }
 
-    // /// Move forward one token in the input and check
-    // /// that we pass the kind of token we expect, but only if we know its there.
-    // pub fn try_consume(&mut self, expected: &Kind) -> Option<Token> {
-    //     if self.at(expected.to_owned()) {
-    //         return Some(self.consume(expected));
-    //     }
-
-    //     None
-    // }
+    pub fn module(&mut self, path: PathBuf) -> Result<Module> {
+        let mut imports = HashMap::default();
+        statement::imports(self, path.clone(), &mut imports)?;
+        let ast = self.file()?;
+        Ok(Module { path, ast, imports })
+    }
 
     pub fn file(&mut self) -> Result<ast::Ast> {
         statement::statement(self)

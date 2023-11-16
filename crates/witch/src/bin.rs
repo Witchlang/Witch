@@ -17,7 +17,7 @@ fn main() {
 }
 
 fn run(file_path: &str) {
-    let (bytecode, _) = compile(PathBuf::from(file_path), None).unwrap();
+    let bytecode = compile(PathBuf::from(file_path)).unwrap();
     let mut vm = Vm::new();
     let result = vm.run(bytecode).unwrap();
     dbg!(result);

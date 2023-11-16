@@ -13,7 +13,7 @@ use anyhow::anyhow;
 use std::collections::HashMap;
 use witch_parser::types::Type;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct TypeSystem {
     /// Types are global for a module context
     types: HashMap<String, Type>,
@@ -100,6 +100,7 @@ impl TypeSystem {
                 returns,
                 is_variadic,
                 generics,
+                is_method,
             } => {
                 self.push_scope(generics.clone().into_iter().collect());
                 let args: Vec<Type> = args
@@ -115,6 +116,7 @@ impl TypeSystem {
                     returns,
                     is_variadic,
                     generics,
+                    is_method,
                 })
             }
 
