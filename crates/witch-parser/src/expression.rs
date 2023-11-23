@@ -43,7 +43,15 @@ pub fn expression_inner<'input>(
             // new Foo {}
             let _ = p.consume(&Kind::KwNew)?;
             let token = p.consume(&Kind::Ident)?;
-            let ident = p.text(&token).to_string();
+            let mut ident = p.text(&token).to_string();
+
+            if p.at(Kind::Dot) {
+                p.consume(&Kind::Dot)?;
+                let token2 = p.consume(&Kind::Ident)?;
+                let ident2 = p.text(&token2);
+                ident = format!("{}.{}", ident, ident2);
+            }
+
             p.consume(&Kind::LBrace)?;
             let fields = map_values(p, HashMap::default())?;
             p.consume(&Kind::RBrace)?;

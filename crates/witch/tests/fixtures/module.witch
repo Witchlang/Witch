@@ -1,3 +1,7 @@
 import ./sub_module
 
+function fooer() -> sub_module.Foo {
+    return new sub_module.Foo { field: 10, greeting: () -> string: "hello" }
+}
+
 sub_module.public_function(1).greeting()

@@ -16,7 +16,7 @@ use witch_parser::types::Type;
 #[derive(Clone, Debug, PartialEq)]
 pub struct TypeSystem {
     /// Types are global for a module context
-    types: HashMap<String, Type>,
+    pub types: HashMap<String, Type>,
 
     /// Variable mappings. These are used to enhance types from abstract
     /// into more concrete.

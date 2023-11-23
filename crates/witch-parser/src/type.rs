@@ -1,3 +1,4 @@
+use core::fmt;
 use std::collections::HashMap;
 
 use crate::error::{Error, Result};
@@ -270,8 +271,16 @@ pub fn type_literal<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<Typ
     let ty = match p.peek() {
         Some(Kind::Ident) => {
             let token = p.consume(&Kind::Ident)?;
-            let ident = p.text(&token);
+            let mut ident = p.text(&token).to_string();
             let mut inner = vec![];
+
+            // Period delimited namespace + identifier for the type
+            if p.at(Kind::Dot) {
+                p.consume(&Kind::Dot)?;
+                let token2 = p.consume(&Kind::Ident)?;
+                let ident2 = p.text(&token2);
+                ident = format!("{}.{}", ident, ident2);
+            }
 
             if p.at(Kind::LSquare) {
                 p.consume(&Kind::LSquare)?;
@@ -279,7 +288,7 @@ pub fn type_literal<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<Typ
                 p.consume(&Kind::RSquare)?;
             }
 
-            Type::from_str(ident, inner)
+            Type::from_str(&ident, inner)
         }
         Some(Kind::LParen | Kind::LSquare) => function_signature(p)?,
         kind => {

@@ -42,16 +42,15 @@ pub fn compile(file_path: PathBuf) -> Result<Vec<u8>> {
     let mut modules = vec![prelude()];
     resolve_dependencies(module, &mut modules);
 
-    // For each module, compile them. Calculate stack offset for each before compiling the next one
-    // for each module compilation, look up its imports and add them to the locals of the main scope
-    // when running module.symbol() etc, look up the imported module in the reference vec and apply its stack_offset to its local variable
-    // for all other stack interactions, apply the current modules stack offset
-
     let mut bc = vec![];
     let mut module_library = vec![];
+    let mut imported_types: HashMap<String, Type> = HashMap::default();
     for module in modules.iter() {
-        println!("{:?}", &module.path);
         let mut ctx = Context::new(module.path.clone(), &module_library);
+
+        if !imported_types.is_empty() {
+            ctx.ts.types = imported_types.clone();
+        }
 
         for (mod_path, _) in module.imports.iter() {
             ctx.scope()?.locals.push(LocalVariable {
@@ -64,7 +63,17 @@ pub fn compile(file_path: PathBuf) -> Result<Vec<u8>> {
         }
 
         let (mut bytecode, _) = compiler::compile(&mut ctx, &module.ast)?;
-        dbg!(&ctx.scopes[0]);
+
+        let mod_name = module
+            .path
+            .file_stem()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        for (name, typ) in ctx.ts.types.iter() {
+            imported_types.insert(format!("{}.{}", mod_name, name), typ.clone());
+        }
+
         bytecode = [ctx.flush(), bytecode].concat();
         bc.append(&mut bytecode);
         module_library.push((
@@ -85,25 +94,8 @@ pub fn compile(file_path: PathBuf) -> Result<Vec<u8>> {
         ));
     }
 
-    let calculated = module_library
-        .iter()
-        .fold(0, |acc, cur| acc + cur.1.stack_offset)
-        + module_library.last().unwrap().1.locals.len();
-    dbg!(&calculated);
-
     Ok(bc)
 
-    // // If no context is provided, create a new one and compile the prelude for it
-    // let mut ctx = maybe_ctx.unwrap_or_else(|| {
-    //     let mut ctx = Context::new(root_path);
-    //     let (prelude, _) = compiler::compile(&mut ctx, &witch_std::prelude()).unwrap();
-    //     ctx.prelude = Some(prelude);
-    //     ctxs
-    // });
-
-    // let (bc, _) = compiler::compile(&mut ctx, &ast).unwrap();
-
-    // Ok(([ctx.flush(), bc].concat(), ctx))
 }
 
 /// Canonicalizes a file path from our `start_path`, returning the new path as well as the file contents.

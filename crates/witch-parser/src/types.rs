@@ -169,6 +169,7 @@ pub enum Type {
     /// This allows us to compare type T to U: InterfaceOne + InterfaceTwo, etc
     Intersection(Vec<Type>),
 
+    /// A module
     Module {
         path: PathBuf,
     },
