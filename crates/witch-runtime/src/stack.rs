@@ -1,3 +1,5 @@
+use core::fmt::Error;
+
 use alloc::vec;
 use alloc::vec::Vec;
 
@@ -8,6 +10,7 @@ use crate::value::Value;
 pub enum Pointer {
     Heap(usize),
     Vtable(usize),
+    NativeFunction(usize),
 }
 
 /// Pointer is a usize referring to a Value on the heap
@@ -43,15 +46,6 @@ impl From<Entry> for Value {
             Entry::Bool(b) => Value::Bool(b),
             Entry::Usize(i) => Value::Usize(i),
             Entry::Void => Value::Void,
-            x => todo!("{:?}", x),
-        }
-    }
-}
-
-impl From<Value> for Entry {
-    fn from(val: Value) -> Self {
-        match val {
-            Value::Usize(i) => Entry::Usize(i),
             x => todo!("{:?}", x),
         }
     }

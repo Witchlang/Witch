@@ -33,6 +33,12 @@ pub enum Value {
     F64(f64),
 }
 
+impl Into<Value> for () {
+    fn into(self) -> Value {
+        Value::Void
+    }
+}
+
 impl From<Value> for usize {
     fn from(val: Value) -> Self {
         match val {

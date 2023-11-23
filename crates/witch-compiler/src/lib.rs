@@ -95,7 +95,6 @@ pub fn compile(file_path: PathBuf) -> Result<Vec<u8>> {
     }
 
     Ok(bc)
-
 }
 
 /// Canonicalizes a file path from our `start_path`, returning the new path as well as the file contents.

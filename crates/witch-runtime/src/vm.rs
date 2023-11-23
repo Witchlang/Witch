@@ -9,6 +9,7 @@ use alloc::vec::Vec;
 use serde::{Deserialize, Serialize};
 
 use crate::heap::Heap;
+use crate::native_function::NativeFunction;
 use crate::stack::{Entry, Function as StackFunction, Pointer, Stack};
 use crate::value::Value;
 
@@ -135,14 +136,16 @@ pub struct CallFrame {
 }
 
 pub struct Vm {
-    stack: Stack,
-    heap: Heap,
+    pub stack: Stack,
+    pub heap: Heap,
     frames: Vec<CallFrame>,
 
     modules: Vec<Stack>,
 
     /// The bytecode of the current callframe. Only used for lookups (next N bytes, etc..)
     bytecode: Vec<u8>,
+
+    native_functions: Vec<NativeFunction>,
 
     /// Our function vtable. Struct methods go here.
     functions: Vec<StackFunction>,
@@ -160,6 +163,10 @@ impl Default for Vm {
     }
 }
 
+pub fn hej(_vm: &mut Vm) {
+    dbg!("hej");
+}
+
 impl Vm {
     pub fn new() -> Self {
         Self {
@@ -168,6 +175,7 @@ impl Vm {
             modules: vec![],
             frames: vec![],
             bytecode: vec![],
+            native_functions: vec![NativeFunction::new(Box::new(hej))],
             functions: vec![],
             upvalue_refs: vec![],
             upvalues: vec![],
@@ -221,8 +229,26 @@ impl Vm {
         }
     }
 
-    fn to_value(&mut self, entry: Entry) -> Value {
+    pub fn to_value(&mut self, entry: Entry) -> Value {
         self.to_value_ref(entry).borrow().clone()
+    }
+
+    pub fn pop_value(&mut self) -> Option<Value> {
+        let entry = self.stack.pop();
+        if let Some(entry) = entry {
+            return Some(self.to_value(entry));
+        }
+        None
+    }
+
+    /// Pushes a Value onto the stack
+    pub fn push_value(&mut self, value: Value) {
+        let entry = match value {
+            Value::Bool(x) => Entry::Bool(x),
+            Value::Usize(x) => Entry::Usize(x),
+            value => Entry::Pointer(Pointer::Heap(self.heap.insert(value))),
+        };
+        self.stack.push(entry);
     }
 
     /// Moves a stack entry to the heap and stashes a copy of the pointer
@@ -698,10 +724,15 @@ impl Vm {
 
                 Op::Call => {
                     let entry = self.stack.pop().unwrap();
-                    self.push_callframe(entry);
-                    continue;
-
-                    //todo support native functions by matching on entry
+                    match entry {
+                        Entry::Pointer(Pointer::NativeFunction(p)) => {
+                            self.native_functions[p].0.clone()(self); // TODO get this non-cloneable
+                        }
+                        entry => {
+                            self.push_callframe(entry);
+                            continue;
+                        }
+                    }
                 }
 
                 Op::Collect => {
