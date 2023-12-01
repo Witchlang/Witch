@@ -6,9 +6,13 @@ edition = "2021"
 [features]
 default = ["debug"]
 debug = []
+compiler = ["witch_macro/compiler"]
 
 [dependencies]
 slab = "0.4.9"
+witch_macro = { path = "../witch-macro" }
 serde = { version = "1.0.130", default-features = false, features = ["derive", "alloc", "rc"] }
 bincode = { version = "2.0.0-rc.3", default-features = false, features = ["alloc", "serde"] }
 hashbrown = { version = "0.14", features = ["serde"] }
+paste = "1.0.14"
+quote = "1.0.33"

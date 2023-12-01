@@ -1,7 +1,10 @@
 use core::cell::RefCell;
+use crate::alloc::borrow::ToOwned;
 
 #[cfg(feature = "profile")]
 use std::collections::HashMap;
+
+use crate::{dbg, builtins};
 
 use alloc::rc::Rc;
 use alloc::vec;
@@ -9,7 +12,7 @@ use alloc::vec::Vec;
 use serde::{Deserialize, Serialize};
 
 use crate::heap::Heap;
-use crate::native_function::NativeFunction;
+use crate::builtins::Builtin;
 use crate::stack::{Entry, Function as StackFunction, Pointer, Stack};
 use crate::value::Value;
 
@@ -129,7 +132,6 @@ impl core::convert::From<u8> for Op {
 
 #[derive(Clone, Copy, Debug)]
 pub struct CallFrame {
-    //pub ptr: Entry,
     pub ip: usize,
     pub upvalues_refs_idx: usize,
     stack_start: usize,
@@ -145,7 +147,7 @@ pub struct Vm {
     /// The bytecode of the current callframe. Only used for lookups (next N bytes, etc..)
     bytecode: Vec<u8>,
 
-    native_functions: Vec<NativeFunction>,
+    builtins: Vec<Builtin>,
 
     /// Our function vtable. Struct methods go here.
     functions: Vec<StackFunction>,
@@ -175,7 +177,7 @@ impl Vm {
             modules: vec![],
             frames: vec![],
             bytecode: vec![],
-            native_functions: vec![NativeFunction::new(Box::new(hej))],
+            builtins: builtins::builtins(),
             functions: vec![],
             upvalue_refs: vec![],
             upvalues: vec![],
@@ -726,7 +728,7 @@ impl Vm {
                     let entry = self.stack.pop().unwrap();
                     match entry {
                         Entry::Pointer(Pointer::NativeFunction(p)) => {
-                            self.native_functions[p].0.clone()(self); // TODO get this non-cloneable
+                            self.builtins[p].0.clone()(self); // TODO get this non-cloneable
                         }
                         entry => {
                             self.push_callframe(entry);
@@ -793,6 +795,7 @@ impl Vm {
                 .or_insert((opcode_timer_start.elapsed().as_nanos(), 1));
         }
 
+        #[cfg(feature = "debug")]
         println!("program exit with stack len {}", self.stack.len());
 
         // When the script exits, return whatever is on the top of the stack

@@ -1,10 +1,46 @@
-use crate::{value::Value, vm::Vm};
+use crate::{value::Value, vm::Vm, stack::Entry};
 use alloc::boxed::Box;
 use alloc::sync::Arc;
 use core::convert::{From, Into};
+use paste::paste;
+mod sys;
+use sys::*;
 
-pub struct NativeFunction(pub Handler);
-impl NativeFunction {
+#[derive(Debug)]
+pub struct BuiltinInfo {
+    name: &'static str,
+    inputs: &'static str,
+    output: &'static str
+}
+
+macro_rules! builtins {
+
+    ($($idents:ident),*) => {
+
+        #[cfg(not(feature = "compiler"))]
+        pub fn builtins() -> Vec<Builtin> {
+            vec![$(Builtin::new(Box::new($idents))),*]
+        }
+
+        #[cfg(feature = "compiler")]
+        pub fn builtins() -> Vec<Builtin> {
+            paste! { vec![$(Builtin::new(Box::new([<$idents __fn>]))),*] }
+        }
+
+        #[cfg(feature = "compiler")]
+        pub fn builtins_info() -> Vec<BuiltinInfo> {
+            vec![$($idents),*]
+        }
+
+    };
+}
+
+builtins!{
+    witch_sys_print
+}
+
+pub struct Builtin(pub Handler);
+impl Builtin {
     pub fn new<Args: 'static>(func: Box<dyn Function<Args>>) -> Self {
         Self(Arc::new(move |vm| unsafe {
             (*func).fn_call(vm);
@@ -46,22 +82,22 @@ where
     }
 }
 
-// impl<Func, A, B, Return> Function<(A, B)> for Func
-// where
-//     Func: 'static + Send + Sync + Fn(&mut Vm, A, B) -> Return,
-//     Return: Into<Value>,
-//     A: From<Entry>,
-//     B: From<Entry>,
-// {
-//     unsafe fn fn_call(&self, vm: &mut Vm) {
-//         let b = vm.stack.pop().unwrap().into();
-//         let a = vm.stack.pop().unwrap().into();
-//         let ret = self(vm, a, b);
+impl<Func, A, B, Return> Function<(A, B)> for Func
+where
+    Func: 'static + Send + Sync + Fn(&mut Vm, A, B) -> Return,
+    Return: Into<Value>,
+    A: From<Entry>,
+    B: From<Entry>,
+{
+    unsafe fn fn_call(&self, vm: &mut Vm) {
+        let b = vm.stack.pop().unwrap().into();
+        let a = vm.stack.pop().unwrap().into();
+        let ret = self(vm, a, b);
 
-//         let return_value = Into::<Value>::into(ret);
-//         vm.push_value(return_value);
-//     }
-// }
+        let return_value = Into::<Value>::into(ret);
+        vm.push_value(return_value);
+    }
+}
 
 // impl<Func, A, B, C, Return> Function<(A, B, C)> for Func
 // where

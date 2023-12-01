@@ -16,6 +16,7 @@ pub enum Value {
         arity: usize,
         upvalues_refs_idx: usize,
     },
+    NativeFunction(usize),
     I8(i8),
     U8(u8),
     I16(i16),
@@ -43,6 +44,15 @@ impl From<Value> for usize {
     fn from(val: Value) -> Self {
         match val {
             Value::Usize(i) => i,
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl From<Value> for String {
+    fn from(val: Value) -> Self {
+        match val {
+            Value::String(i) => i,
             _ => unreachable!(),
         }
     }
