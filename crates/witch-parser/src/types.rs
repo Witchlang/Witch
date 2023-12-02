@@ -2,6 +2,7 @@ use core::hash::{Hash, Hasher};
 use core::mem::discriminant;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use witch_runtime::builtins::BuiltinInfo;
 use witch_runtime::value::Value;
 
 use crate::ast::{Ast, Operator};
@@ -316,6 +317,12 @@ impl From<&Value> for Type {
             Value::Function(_) => Type::Unknown,
             x => todo!("{:?}", x),
         }
+    }
+}
+
+impl From<&BuiltinInfo> for Type {
+    fn from(info: &BuiltinInfo) -> Self {
+        Type::Function { args: info.inputs.split(',').map(|s| Type::from_str(s, vec![])).collect(), returns: Box::new(Type::from_str(info.output, vec![])), is_variadic: false, is_method: false, generics: vec![] }
     }
 }
 

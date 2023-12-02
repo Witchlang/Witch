@@ -1,6 +1,6 @@
 use proc_macro::TokenStream;
 use quote::{format_ident, quote, ToTokens};
-use syn::{parse_macro_input, punctuated::Punctuated, ItemFn, Path, Token};
+use syn::{parse_macro_input, ItemFn};
 
 fn extract_input_type(inputs: &syn::FnArg) -> String {
     match inputs {
@@ -33,12 +33,13 @@ pub fn builtin(_: TokenStream, input: TokenStream) -> TokenStream {
             .sig
             .inputs
             .iter()
+            .skip(1) // Skip over the builtin VM argument
             .filter_map(|arg| match arg {
-                syn::FnArg::Typed(_) => Some(extract_input_type(arg)),
+                syn::FnArg::Typed(_) => Some(extract_input_type(arg).to_lowercase()),
                 _ => None,
             })
             .collect::<Vec<String>>()
-            .join(", ");
+            .join(",");
 
         let output_type = extract_output_type(&input_fn.sig.output).to_string();
 

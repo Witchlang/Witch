@@ -34,8 +34,8 @@ pub enum Value {
     F64(f64),
 }
 
-impl Into<Value> for () {
-    fn into(self) -> Value {
+impl From<()> for Value {
+    fn from(_val: ()) -> Self {
         Value::Void
     }
 }

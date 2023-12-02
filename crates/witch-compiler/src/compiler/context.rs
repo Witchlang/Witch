@@ -7,6 +7,7 @@ use std::{
     path::{Component, PathBuf},
 };
 use witch_parser::{types::Type, Ast, Parser};
+use witch_runtime::builtins::BuiltinInfo;
 use witch_runtime::vm::Op;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -138,6 +139,15 @@ impl<'a> Context<'a> {
             .find(|(_, m)| &m.path == path)
             .map(|(_, m)| m)
             .cloned()
+    }
+
+    /// Retrieves the builtin index and its type signature, if it exists
+    pub fn get_builtin(&self, ident: &str) -> Option<(usize, Type)> {
+        witch_runtime::builtins::builtins_info()
+            .iter()
+            .enumerate()
+            .find(|(idx, b)| b.name == ident)
+            .map(|(idx, b)| (idx, Type::from(b)))
     }
 
     /// Handles importing of other Witch modules

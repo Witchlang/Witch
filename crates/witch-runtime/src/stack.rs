@@ -1,4 +1,4 @@
-use core::fmt::Error;
+
 
 use alloc::vec;
 use alloc::vec::Vec;
@@ -10,7 +10,7 @@ use crate::value::Value;
 pub enum Pointer {
     Heap(usize),
     Vtable(usize),
-    NativeFunction(usize),
+    Builtin(usize),
 }
 
 /// Pointer is a usize referring to a Value on the heap
@@ -57,6 +57,12 @@ impl From<Entry> for Value {
 #[derive(Debug)]
 pub struct Stack {
     data: Vec<Entry>,
+}
+
+impl Default for Stack {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Stack {

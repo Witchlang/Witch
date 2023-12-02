@@ -72,6 +72,7 @@ pub enum Op {
     GetModuleSymbol,
     GetValue,
     GetFunction,
+    GetBuiltin,
 
     Push,
     Pop,
@@ -104,26 +105,27 @@ impl core::convert::From<u8> for Op {
             2 => Op::GetModuleSymbol,
             3 => Op::GetValue,
             4 => Op::GetFunction,
+            5 => Op::GetBuiltin,
 
-            5 => Op::Push,
-            6 => Op::Pop,
-            7 => Op::Get,
-            8 => Op::GetUpvalue,
-            9 => Op::GetMember,
-            10 => Op::Set,
-            11 => Op::SetProperty,
+            6 => Op::Push,
+            7 => Op::Pop,
+            8 => Op::Get,
+            9 => Op::GetUpvalue,
+            10 => Op::GetMember,
+            11 => Op::Set,
+            12 => Op::SetProperty,
 
-            12 => Op::SetReturn,
-            13 => Op::Jump,
-            14 => Op::JumpIfFalse,
+            13 => Op::SetReturn,
+            14 => Op::Jump,
+            15 => Op::JumpIfFalse,
 
-            15 => Op::Binary,
-            16 => Op::Return,
-            17 => Op::Call,
+            16 => Op::Binary,
+            17 => Op::Return,
+            18 => Op::Call,
 
-            18 => Op::Collect,
+            19 => Op::Collect,
 
-            19 => Op::Debug,
+            20 => Op::Debug,
 
             _ => Op::Crash,
         }
@@ -450,6 +452,13 @@ impl Vm {
                     offset = 1;
                 }
 
+                Op::GetBuiltin => {
+                    let idx = self.next_byte();
+                    self.stack
+                        .push(Entry::Pointer(Pointer::Builtin(idx as usize)));
+                    offset = 1;
+                }
+
                 Op::Push => {
                     let value_length_bytes: [u8; 8] = self.next_eight_bytes();
                     let value_length = usize::from_ne_bytes(value_length_bytes);
@@ -727,7 +736,7 @@ impl Vm {
                 Op::Call => {
                     let entry = self.stack.pop().unwrap();
                     match entry {
-                        Entry::Pointer(Pointer::NativeFunction(p)) => {
+                        Entry::Pointer(Pointer::Builtin(p)) => {
                             self.builtins[p].0.clone()(self); // TODO get this non-cloneable
                         }
                         entry => {

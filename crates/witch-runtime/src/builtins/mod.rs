@@ -8,9 +8,9 @@ use sys::*;
 
 #[derive(Debug)]
 pub struct BuiltinInfo {
-    name: &'static str,
-    inputs: &'static str,
-    output: &'static str
+    pub name: &'static str,
+    pub inputs: &'static str,
+    pub output: &'static str
 }
 
 macro_rules! builtins {
@@ -36,7 +36,7 @@ macro_rules! builtins {
 }
 
 builtins!{
-    witch_sys_print
+    witch__print
 }
 
 pub struct Builtin(pub Handler);

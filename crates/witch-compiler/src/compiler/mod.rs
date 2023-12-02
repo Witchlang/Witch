@@ -902,6 +902,8 @@ fn var(ctx: &mut Context, ident: &String) -> Result<(Vec<u8>, Type)> {
         unreachable!()
     } else if let Some((idx, return_type)) = ctx.resolve_upvalue(ident, ctx.scopes.len() - 1)? {
         return Ok((vec![Op::GetUpvalue as u8, idx as u8], return_type));
+    } else if let Some((idx, return_type)) = ctx.get_builtin(ident) {
+        return Ok((vec![Op::GetBuiltin as u8, idx as u8], return_type));
     } else {
         dbg!(ident);
         todo!();
