@@ -1,7 +1,10 @@
 use core::cell::RefCell;
+use crate::alloc::borrow::ToOwned;
 
 #[cfg(feature = "profile")]
 use std::collections::HashMap;
+
+use crate::{dbg, builtins};
 
 use alloc::rc::Rc;
 use alloc::vec;
@@ -9,8 +12,9 @@ use alloc::vec::Vec;
 use serde::{Deserialize, Serialize};
 
 use crate::heap::Heap;
+use crate::builtins::Builtin;
 use crate::stack::{Entry, Function as StackFunction, Pointer, Stack};
-use crate::value::{Function, Value};
+use crate::value::Value;
 
 #[derive(Debug)]
 enum Upvalue {
@@ -63,12 +67,15 @@ impl core::convert::From<u8> for InfixOp {
 #[derive(Serialize, Debug, Deserialize, PartialEq, Clone)]
 #[repr(u8)]
 pub enum Op {
-    SetupValueCache,
+    SetupModule,
     SetupFunctionCache,
+    GetModuleSymbol,
     GetValue,
     GetFunction,
+    GetBuiltin,
 
     Push,
+    Pop,
     Get,
     GetUpvalue,
     GetMember,
@@ -85,33 +92,40 @@ pub enum Op {
 
     Collect,
 
+    Debug,
+
     Crash,
 }
 
 impl core::convert::From<u8> for Op {
     fn from(byte: u8) -> Self {
         match byte {
-            0 => Op::SetupValueCache,
+            0 => Op::SetupModule,
             1 => Op::SetupFunctionCache,
-            2 => Op::GetValue,
-            3 => Op::GetFunction,
+            2 => Op::GetModuleSymbol,
+            3 => Op::GetValue,
+            4 => Op::GetFunction,
+            5 => Op::GetBuiltin,
 
-            4 => Op::Push,
-            5 => Op::Get,
-            6 => Op::GetUpvalue,
-            7 => Op::GetMember,
-            8 => Op::Set,
-            9 => Op::SetProperty,
+            6 => Op::Push,
+            7 => Op::Pop,
+            8 => Op::Get,
+            9 => Op::GetUpvalue,
+            10 => Op::GetMember,
+            11 => Op::Set,
+            12 => Op::SetProperty,
 
-            10 => Op::SetReturn,
-            11 => Op::Jump,
-            12 => Op::JumpIfFalse,
+            13 => Op::SetReturn,
+            14 => Op::Jump,
+            15 => Op::JumpIfFalse,
 
-            13 => Op::Binary,
-            14 => Op::Return,
-            15 => Op::Call,
+            16 => Op::Binary,
+            17 => Op::Return,
+            18 => Op::Call,
 
-            16 => Op::Collect,
+            19 => Op::Collect,
+
+            20 => Op::Debug,
 
             _ => Op::Crash,
         }
@@ -120,19 +134,22 @@ impl core::convert::From<u8> for Op {
 
 #[derive(Clone, Copy, Debug)]
 pub struct CallFrame {
-    //pub ptr: Entry,
     pub ip: usize,
     pub upvalues_refs_idx: usize,
     stack_start: usize,
 }
 
 pub struct Vm {
-    stack: Stack,
-    heap: Heap,
+    pub stack: Stack,
+    pub heap: Heap,
     frames: Vec<CallFrame>,
+
+    modules: Vec<Stack>,
 
     /// The bytecode of the current callframe. Only used for lookups (next N bytes, etc..)
     bytecode: Vec<u8>,
+
+    builtins: Vec<Builtin>,
 
     /// Our function vtable. Struct methods go here.
     functions: Vec<StackFunction>,
@@ -150,13 +167,19 @@ impl Default for Vm {
     }
 }
 
+pub fn hej(_vm: &mut Vm) {
+    dbg!("hej");
+}
+
 impl Vm {
     pub fn new() -> Self {
         Self {
             stack: Stack::new(),
             heap: Heap::default(),
+            modules: vec![],
             frames: vec![],
             bytecode: vec![],
+            builtins: builtins::builtins(),
             functions: vec![],
             upvalue_refs: vec![],
             upvalues: vec![],
@@ -210,8 +233,26 @@ impl Vm {
         }
     }
 
-    fn to_value(&mut self, entry: Entry) -> Value {
+    pub fn to_value(&mut self, entry: Entry) -> Value {
         self.to_value_ref(entry).borrow().clone()
+    }
+
+    pub fn pop_value(&mut self) -> Option<Value> {
+        let entry = self.stack.pop();
+        if let Some(entry) = entry {
+            return Some(self.to_value(entry));
+        }
+        None
+    }
+
+    /// Pushes a Value onto the stack
+    pub fn push_value(&mut self, value: Value) {
+        let entry = match value {
+            Value::Bool(x) => Entry::Bool(x),
+            Value::Usize(x) => Entry::Usize(x),
+            value => Entry::Pointer(Pointer::Heap(self.heap.insert(value))),
+        };
+        self.stack.push(entry);
     }
 
     /// Moves a stack entry to the heap and stashes a copy of the pointer
@@ -244,13 +285,31 @@ impl Vm {
         }
     }
 
-    // TODO OPTIMIZE, no clones, make all bytecode easier to reference ????
     pub fn push_callframe(&mut self, entry: Entry) {
         let f = match entry {
             Entry::Function(f) => f,
+            Entry::Pointer(Pointer::Heap(ptr)) => {
+                let value = self.heap.get(ptr);
+                let tmp = value.borrow();
+                if let Value::StackFunction {
+                    addr,
+                    arity,
+                    upvalues_refs_idx,
+                } = *tmp
+                {
+                    StackFunction {
+                        addr,
+                        arity,
+                        upvalues_refs_idx,
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
             Entry::Pointer(Pointer::Vtable(p)) => self.functions[p],
             x => {
-                dbg!(&x);
+                dbg!(&self.stack);
+                dbg!(&self.to_value(x));
                 unreachable!()
             }
         };
@@ -344,6 +403,25 @@ impl Vm {
 
             // An offset to the instruction pointer, for when ops consume more bytes than 1
             match op {
+                Op::Debug => {
+                    dbg!(&self.stack.len());
+                }
+
+                Op::SetupModule => {
+                    // TODO
+                    // Get the module stack length and take it off the top of the main stack
+                    // Put it into self.modules
+                    let entries = self.next_byte();
+                    offset = 1;
+
+                    let mut stack = Stack::new();
+                    for e in self.stack.take(entries as usize) {
+                        stack.push(e);
+                    }
+
+                    self.modules.push(stack);
+                }
+
                 Op::SetupFunctionCache => {
                     let num_items_bytes = self.next_eight_bytes();
                     let num_items = usize::from_ne_bytes(num_items_bytes);
@@ -359,10 +437,25 @@ impl Vm {
                     offset = 8;
                 }
 
+                Op::GetModuleSymbol => {
+                    let [module_idx, local_idx] = self.next_two_bytes();
+                    offset = 2;
+
+                    self.stack
+                        .push(self.modules[module_idx as usize].get(local_idx as usize));
+                }
+
                 Op::GetFunction => {
                     let idx = self.next_byte();
                     self.stack
                         .push(Entry::Pointer(Pointer::Vtable(idx as usize)));
+                    offset = 1;
+                }
+
+                Op::GetBuiltin => {
+                    let idx = self.next_byte();
+                    self.stack
+                        .push(Entry::Pointer(Pointer::Builtin(idx as usize)));
                     offset = 1;
                 }
 
@@ -436,6 +529,10 @@ impl Vm {
                     self.stack.push(stackentry);
 
                     offset = 8 + value_length + additional_offset;
+                }
+
+                Op::Pop => {
+                    self.stack.pop();
                 }
 
                 Op::Get => {
@@ -638,10 +735,15 @@ impl Vm {
 
                 Op::Call => {
                     let entry = self.stack.pop().unwrap();
-                    self.push_callframe(entry);
-                    continue;
-
-                    //todo support native functions by matching on entry
+                    match entry {
+                        Entry::Pointer(Pointer::Builtin(p)) => {
+                            self.builtins[p].0.clone()(self); // TODO get this non-cloneable
+                        }
+                        entry => {
+                            self.push_callframe(entry);
+                            continue;
+                        }
+                    }
                 }
 
                 Op::Collect => {
@@ -655,6 +757,18 @@ impl Vm {
                             }
                             Entry::Usize(n) => {
                                 let ptr = self.heap.insert(Value::Usize(n));
+                                vec.push(ptr);
+                            }
+                            Entry::Function(crate::stack::Function {
+                                addr,
+                                arity,
+                                upvalues_refs_idx,
+                            }) => {
+                                let ptr = self.heap.insert(Value::StackFunction {
+                                    addr,
+                                    arity,
+                                    upvalues_refs_idx,
+                                });
                                 vec.push(ptr);
                             }
                             x => {
@@ -689,6 +803,9 @@ impl Vm {
                 })
                 .or_insert((opcode_timer_start.elapsed().as_nanos(), 1));
         }
+
+        #[cfg(feature = "debug")]
+        println!("program exit with stack len {}", self.stack.len());
 
         // When the script exits, return whatever is on the top of the stack
         if let Some(entry) = self.stack.pop() {

@@ -1,6 +1,8 @@
 use core::hash::{Hash, Hasher};
 use core::mem::discriminant;
 use std::collections::HashMap;
+use std::path::PathBuf;
+use witch_runtime::builtins::BuiltinInfo;
 use witch_runtime::value::Value;
 
 use crate::ast::{Ast, Operator};
@@ -108,6 +110,9 @@ pub enum Type {
         /// Whether the function is variadic, i.e. if it takes a variable number of arguments
         is_variadic: bool,
 
+        /// Whether the function is defined as a struct method (with implicit self as first argument)
+        is_method: bool,
+
         /// A hashmap of defined type variables, e.g. <T, U>(arg: U) -> T {}
         generics: Vec<(String, Self)>,
     },
@@ -164,6 +169,11 @@ pub enum Type {
     /// A type that merges multiple types into one.
     /// This allows us to compare type T to U: InterfaceOne + InterfaceTwo, etc
     Intersection(Vec<Type>),
+
+    /// A module
+    Module {
+        path: PathBuf,
+    },
 
     /// An unknown type is one that we haven't yet inferred, or are unable to do so
     Unknown,
@@ -310,6 +320,12 @@ impl From<&Value> for Type {
     }
 }
 
+impl From<&BuiltinInfo> for Type {
+    fn from(info: &BuiltinInfo) -> Self {
+        Type::Function { args: info.inputs.split(',').map(|s| Type::from_str(s, vec![])).collect(), returns: Box::new(Type::from_str(info.output, vec![])), is_variadic: false, is_method: false, generics: vec![] }
+    }
+}
+
 impl From<&Ast> for Type {
     fn from(ast: &Ast) -> Type {
         match ast {
@@ -325,6 +341,7 @@ impl From<&Ast> for Type {
                 returns: Box::new(returns.clone()),
                 is_variadic: *is_variadic,
                 generics: generics.clone(),
+                is_method: false,
             },
             x => {
                 dbg!(x);
@@ -412,6 +429,7 @@ impl Type {
                     returns: Box::new(Type::Usize),
                     is_variadic: false,
                     generics: vec![],
+                    is_method: true,
                 },
                 0,
             ),

@@ -1,6 +1,6 @@
-use std::ops::Range;
+use std::{fmt::Display, ops::Range};
 
-pub type Result<T> = core::result::Result<T, Error>;
+pub type Result<T> = anyhow::Result<T>;
 
 #[derive(Debug)]
 pub struct Error {
@@ -8,6 +8,14 @@ pub struct Error {
     span: Range<usize>,
     source: String,
 }
+
+impl Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.msg)
+    }
+}
+
+impl std::error::Error for Error {}
 
 impl Error {
     pub fn new(msg: &str, span: Range<usize>, source: &str) -> Self {

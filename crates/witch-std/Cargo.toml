@@ -5,9 +5,8 @@ edition = "2021"
 
 [lib]
 
-[features]
-compiler = []
-
 [dependencies]
 witch_parser = { path = "../witch-parser" }
+witch_runtime = { path = "../witch-runtime", features = ["compiler"] }
+witch_macro = { path = "../witch-macro" }
 serde = { version = "1.0.130", default-features = false, features = ["derive", "alloc", "rc"] }

@@ -9,13 +9,14 @@
 //!
 //!
 use crate::error::{Error, Result};
+use anyhow::anyhow;
 use std::collections::HashMap;
 use witch_parser::types::Type;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct TypeSystem {
     /// Types are global for a module context
-    types: HashMap<String, Type>,
+    pub types: HashMap<String, Type>,
 
     /// Variable mappings. These are used to enhance types from abstract
     /// into more concrete.
@@ -99,6 +100,7 @@ impl TypeSystem {
                 returns,
                 is_variadic,
                 generics,
+                is_method,
             } => {
                 self.push_scope(generics.clone().into_iter().collect());
                 let args: Vec<Type> = args
@@ -114,6 +116,7 @@ impl TypeSystem {
                     returns,
                     is_variadic,
                     generics,
+                    is_method,
                 })
             }
 
@@ -149,7 +152,7 @@ impl TypeSystem {
 
                 return self.types.get(&name).cloned().ok_or_else(|| {
                     dbg!(name);
-                    Error::fatal()
+                    anyhow!(Error::fatal())
                 });
             }
 

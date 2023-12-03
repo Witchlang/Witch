@@ -1,4 +1,6 @@
 use alloc::rc::Rc;
+use alloc::vec::Vec;
+use alloc::vec;
 use core::cell::RefCell;
 use slab::Slab;
 
@@ -59,6 +61,7 @@ impl Heap {
 
     pub fn get_list_item_ptr(&mut self, key: usize, idx: usize) -> usize {
         let obj = self.mem.get_mut(key).unwrap();
+        dbg!(&obj);
         match obj {
             Object::List(list) => list[idx],
             _ => unreachable!(),

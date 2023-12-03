@@ -1,6 +1,1 @@
-let list = [1, 2, 3, 4, 5]
-
-let x = iter(list)
-x.next()
-x.next()
-x.next()
+[1, 2, 3, 4][2]

@@ -20,4 +20,3 @@ function iter[T](data: T) -> Iterator[T] {
         data
     }
 }
-

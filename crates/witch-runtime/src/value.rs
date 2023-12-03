@@ -10,6 +10,13 @@ pub enum Value {
     String(String),
     List(Vec<Self>),
     Function(Function),
+    StackFunction {
+        //TODO terrible name
+        addr: usize,
+        arity: usize,
+        upvalues_refs_idx: usize,
+    },
+    NativeFunction(usize),
     I8(i8),
     U8(u8),
     I16(i16),
@@ -27,10 +34,25 @@ pub enum Value {
     F64(f64),
 }
 
+impl From<()> for Value {
+    fn from(_val: ()) -> Self {
+        Value::Void
+    }
+}
+
 impl From<Value> for usize {
     fn from(val: Value) -> Self {
         match val {
             Value::Usize(i) => i,
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl From<Value> for String {
+    fn from(val: Value) -> Self {
+        match val {
+            Value::String(i) => i,
             _ => unreachable!(),
         }
     }

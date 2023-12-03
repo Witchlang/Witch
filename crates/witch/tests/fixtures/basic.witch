@@ -1,9 +1,9 @@
 let greeting = "Hello"
-
+ 
 function id [T](n: T) -> T where T: usize {
    return n
 }
-
+ 
 let multiplier = id(5) * 2 + id(4) - 11
 
 greeting * multiplier

@@ -14,7 +14,10 @@ use anyhow::Context as AContext;
 use anyhow::Result;
 
 use compiler::context::Context;
+use witch_parser::types::Type;
+use witch_std::prelude;
 
+use std::collections::HashMap;
 use std::{
     env::current_dir,
     path::{Path, PathBuf},
@@ -22,25 +25,76 @@ use std::{
 
 use witch_parser::Parser;
 
+use crate::compiler::context::Module;
+use crate::compiler::LocalVariable;
+use crate::module::resolve_dependencies;
+
 mod compiler;
 mod error;
+mod module;
 
 /// Takes a Witch source file and compiles it to bytecode, or returns `error::Error`.
-pub fn compile(file_path: PathBuf, maybe_ctx: Option<Context>) -> Result<(Vec<u8>, Context)> {
-    let (_root_path, source) = resolve_file(None, file_path)?;
+pub fn compile(file_path: PathBuf) -> Result<Vec<u8>> {
+    let (root_path, source) = resolve_file(None, file_path)?;
     let mut parser = Parser::new(&source);
-    let ast = parser.file().unwrap();
+    let module = parser.module(root_path.clone()).unwrap();
 
-    // If no context is provided, create a new one and compile the prelude for it
-    let mut ctx = maybe_ctx.unwrap_or_else(|| {
-        let mut ctx = Context::default();
-        let (prelude, _) = compiler::compile(&mut ctx, &witch_std::prelude()).unwrap();
-        ctx.prelude = Some(prelude);
-        ctx
-    });
+    let mut modules = vec![prelude()];
+    resolve_dependencies(module, &mut modules);
 
-    let (bc, _) = compiler::compile(&mut ctx, &ast).unwrap();
-    Ok(([ctx.flush(), bc].concat(), ctx))
+    let mut bc = vec![];
+    let mut module_library = vec![];
+    let mut imported_types: HashMap<String, Type> = HashMap::default();
+    for module in modules.iter() {
+        let mut ctx = Context::new(module.path.clone(), &module_library);
+
+        if !imported_types.is_empty() {
+            ctx.ts.types = imported_types.clone();
+        }
+
+        for (mod_path, _) in module.imports.iter() {
+            ctx.scope()?.locals.push(LocalVariable {
+                name: mod_path.file_stem().unwrap().to_string_lossy().to_string(),
+                is_captured: false,
+                r#type: Type::Module {
+                    path: mod_path.clone(),
+                },
+            });
+        }
+
+        let (mut bytecode, _) = compiler::compile(&mut ctx, &module.ast)?;
+
+        let mod_name = module
+            .path
+            .file_stem()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        for (name, typ) in ctx.ts.types.iter() {
+            imported_types.insert(format!("{}.{}", mod_name, name), typ.clone());
+        }
+
+        bytecode = [ctx.flush(), bytecode].concat();
+        bc.append(&mut bytecode);
+        module_library.push((
+            module.path.clone(),
+            Module {
+                locals: ctx.scope()?.locals.clone(),
+                vtable_count: ctx.functions_cache.len(),
+                path: module.path.clone(),
+                stack_offset: module_library.iter().fold(0, |mut acc, (_, module)| {
+                    acc += module.locals.len();
+                    acc
+                }),
+                vtable_offset: module_library.iter().fold(0, |mut acc, (_, module)| {
+                    acc += module.vtable_count;
+                    acc
+                }),
+            },
+        ));
+    }
+
+    Ok(bc)
 }
 
 /// Canonicalizes a file path from our `start_path`, returning the new path as well as the file contents.

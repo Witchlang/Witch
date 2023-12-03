@@ -1,0 +1,13 @@
+
+function private_function() -> string {
+    return "Hello from module"
+}
+
+struct Foo {
+    field: usize
+    greeting: () -> string
+}
+
+function public_function(n: usize) -> Foo {
+    return new Foo { field: 5, greeting: private_function }
+}

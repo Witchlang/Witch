@@ -1,7 +1,10 @@
-use std::path::PathBuf;
+use std::collections::HashMap;
+use std::ffi::OsString;
+use std::path::{Component, PathBuf};
 
 use crate::error::Result;
 use crate::lexer::{Kind, Lexer};
+use crate::Module;
 
 use crate::ast::Ast;
 use crate::r#type::{enum_declaration, interface_declaration, struct_declaration};
@@ -11,15 +14,63 @@ use super::expression::{expression, function_expression};
 use super::r#type::type_literal;
 use super::Parser;
 
+/// TODO currently this parses a module multiple time if imported from different modules.
+/// Let the import map be a map between path and indices to a cache vec of modules instead
+pub fn imports<'input>(
+    p: &mut Parser<'input, Lexer<'input>>,
+    root_path: PathBuf,
+    import_map: &mut HashMap<PathBuf, Module>,
+) -> Result<()> {
+    match p.peek() {
+        Some(Kind::KwImport) => {
+            p.consume(&Kind::KwImport)?;
+
+            let mut path = build_path(p, vec![])?.iter().collect::<PathBuf>();
+
+            // Ensure its a .witch file
+            if !path.ends_with(".witch") {
+                path.set_extension("witch");
+            }
+
+            // Deduce whether path is relative to the entry module or abstract
+            // - If it starts with `witch`, it's the std library
+            // - If it starts with ./, its local
+            // - If it just starts with an identifier, its a Grimoire package (TODO)
+            let module_file_path = match path.components().next() {
+                Some(Component::Normal(x)) => todo!("{:?}", x),
+                Some(Component::CurDir) => root_path.parent().unwrap().join(path).canonicalize(),
+                _ => panic!("very bad module path"),
+            }
+            .expect("oh no");
+
+            let source =
+                std::fs::read_to_string(module_file_path.clone()).expect("file read error");
+
+            let mut parser = Parser::new(&source);
+            let module = parser
+                .module(module_file_path.clone())
+                .expect("module parser error");
+
+            import_map.insert(module_file_path, module);
+
+            imports(p, root_path, import_map)
+        }
+        _ => Ok(()),
+    }
+}
+
 pub fn statement<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<Ast> {
     let start = p.cursor;
     let stmt = match p.peek() {
         Some(Kind::RBrace) => Ast::Nop,
         Some(Kind::KwImport) => {
-            let token = p.consume(&Kind::KwImport)?;
+            p.consume(&Kind::KwImport)?;
+
+            let path = build_path(p, vec![])?.iter().collect::<PathBuf>();
+
             let stmt = Ast::Import {
-                path: Box::new(PathBuf::from(p.text(&token))),
-                span: token.span,
+                path: Box::new(path),
+                span: start..p.cursor,
             };
             let end = p.cursor;
             Ast::Statement {
@@ -158,6 +209,38 @@ pub fn statement<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<Ast> {
         p.consume(&Kind::Semicolon)?;
     }
     Ok(stmt)
+}
+
+fn build_path<'input>(
+    p: &mut Parser<'input, Lexer<'input>>,
+    mut components: Vec<OsString>,
+) -> Result<Vec<OsString>> {
+    match p.peek() {
+        Some(Kind::Dot) => {
+            p.consume(&Kind::Dot)?;
+            components.push(OsString::from("."));
+            build_path(p, components)
+        }
+
+        Some(Kind::Slash) => {
+            p.consume(&Kind::Slash)?;
+            build_path(p, components)
+        }
+
+        Some(Kind::Ident) => {
+            let token = p.consume(&Kind::Ident)?;
+            let component = OsString::from(p.text(&token));
+            components.push(component);
+            build_path(p, components)
+        }
+
+        Some(Kind::Semicolon) => {
+            p.consume(&Kind::Semicolon)?;
+            Ok(components)
+        }
+
+        _ => panic!("oops"),
+    }
 }
 
 fn assignment<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<(Option<Type>, Ast)> {

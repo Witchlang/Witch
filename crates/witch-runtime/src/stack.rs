@@ -1,3 +1,5 @@
+
+
 use alloc::vec;
 use alloc::vec::Vec;
 
@@ -8,6 +10,7 @@ use crate::value::Value;
 pub enum Pointer {
     Heap(usize),
     Vtable(usize),
+    Builtin(usize),
 }
 
 /// Pointer is a usize referring to a Value on the heap
@@ -48,21 +51,18 @@ impl From<Entry> for Value {
     }
 }
 
-impl From<Value> for Entry {
-    fn from(val: Value) -> Self {
-        match val {
-            Value::Usize(i) => Entry::Usize(i),
-            x => todo!("{:?}", x),
-        }
-    }
-}
-
 /// The stack is your normal stack-based abstraction, which of course cheats
 /// where applicable - elements may be modified in place or accessed at their indices
 /// rather than necessarily requiring pushing or poping.
 #[derive(Debug)]
 pub struct Stack {
     data: Vec<Entry>,
+}
+
+impl Default for Stack {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Stack {
@@ -87,6 +87,15 @@ impl Stack {
 
     pub fn set(&mut self, idx: usize, entry: Entry) {
         self.data[idx] = entry;
+    }
+
+    pub fn take(&mut self, n: usize) -> Vec<Entry> {
+        let mut taken = vec![];
+        for _ in 0..n {
+            taken.push(self.data.pop().unwrap());
+        }
+        taken.reverse();
+        taken
     }
 
     pub fn len(&self) -> usize {
