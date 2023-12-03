@@ -1,6 +1,7 @@
 use witch_macro::builtin;
 use crate::vm::Vm;
 use super::BuiltinInfo;
+use alloc::string::String;
 
 use alloc::ffi::CString;
 

@@ -9,7 +9,7 @@ debug = []
 compiler = ["witch_macro/compiler"]
 
 [dependencies]
-slab = "0.4.9"
+slab = { version = "0.4.9", default-features = false }
 witch_macro = { path = "../witch-macro" }
 serde = { version = "1.0.130", default-features = false, features = ["derive", "alloc", "rc"] }
 bincode = { version = "2.0.0-rc.3", default-features = false, features = ["alloc", "serde"] }

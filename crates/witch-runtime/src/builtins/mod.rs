@@ -3,6 +3,8 @@ use alloc::boxed::Box;
 use alloc::sync::Arc;
 use core::convert::{From, Into};
 use paste::paste;
+use alloc::vec::Vec;
+use alloc::vec;
 mod sys;
 use sys::*;
 
