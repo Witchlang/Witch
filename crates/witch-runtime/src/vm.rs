@@ -1,18 +1,18 @@
-use core::cell::RefCell;
 use crate::alloc::borrow::ToOwned;
+use core::cell::RefCell;
 
 #[cfg(feature = "profile")]
 use std::collections::HashMap;
 
-use crate::{dbg, builtins};
+use crate::{builtins, dbg};
 
 use alloc::rc::Rc;
 use alloc::vec;
 use alloc::vec::Vec;
 use serde::{Deserialize, Serialize};
 
-use crate::heap::Heap;
 use crate::builtins::Builtin;
+use crate::heap::Heap;
 use crate::stack::{Entry, Function as StackFunction, Pointer, Stack};
 use crate::value::Value;
 

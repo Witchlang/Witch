@@ -16,8 +16,8 @@ macro_rules! dbg {
     };
 }
 
+pub mod builtins;
 mod heap;
 mod stack;
-pub mod builtins;
 pub mod value;
 pub mod vm;

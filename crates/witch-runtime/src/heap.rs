@@ -1,6 +1,6 @@
 use alloc::rc::Rc;
-use alloc::vec::Vec;
 use alloc::vec;
+use alloc::vec::Vec;
 use core::cell::RefCell;
 use slab::Slab;
 

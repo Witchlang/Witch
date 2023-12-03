@@ -322,7 +322,17 @@ impl From<&Value> for Type {
 
 impl From<&BuiltinInfo> for Type {
     fn from(info: &BuiltinInfo) -> Self {
-        Type::Function { args: info.inputs.split(',').map(|s| Type::from_str(s, vec![])).collect(), returns: Box::new(Type::from_str(info.output, vec![])), is_variadic: false, is_method: false, generics: vec![] }
+        Type::Function {
+            args: info
+                .inputs
+                .split(',')
+                .map(|s| Type::from_str(s, vec![]))
+                .collect(),
+            returns: Box::new(Type::from_str(info.output, vec![])),
+            is_variadic: false,
+            is_method: false,
+            generics: vec![],
+        }
     }
 }
 

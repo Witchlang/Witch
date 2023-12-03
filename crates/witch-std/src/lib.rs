@@ -5,7 +5,6 @@
 use std::path::PathBuf;
 use witch_parser::{Module, Parser};
 
-
 pub fn prelude() -> Module {
     let source = include_str!("../prelude/main.witch");
     let mut parser = Parser::new(source);

@@ -1,10 +1,10 @@
-use crate::{value::Value, vm::Vm, stack::Entry};
+use crate::{stack::Entry, value::Value, vm::Vm};
 use alloc::boxed::Box;
 use alloc::sync::Arc;
+use alloc::vec;
+use alloc::vec::Vec;
 use core::convert::{From, Into};
 use paste::paste;
-use alloc::vec::Vec;
-use alloc::vec;
 mod sys;
 use sys::*;
 
@@ -12,7 +12,7 @@ use sys::*;
 pub struct BuiltinInfo {
     pub name: &'static str,
     pub inputs: &'static str,
-    pub output: &'static str
+    pub output: &'static str,
 }
 
 macro_rules! builtins {
@@ -37,7 +37,7 @@ macro_rules! builtins {
     };
 }
 
-builtins!{
+builtins! {
     witch__print
 }
 
