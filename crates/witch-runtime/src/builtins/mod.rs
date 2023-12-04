@@ -38,7 +38,7 @@ macro_rules! builtins {
 }
 
 builtins! {
-    witch__print
+    witch__libc_puts
 }
 
 pub struct Builtin(pub Handler);

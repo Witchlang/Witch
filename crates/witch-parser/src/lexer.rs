@@ -75,6 +75,8 @@ pub enum Kind {
     RBrace,
     #[regex(r#""((\\"|\\\\)|[^\\"])*""#)]
     String,
+    #[regex(r#"c"((\\"|\\\\)|[^\\"])*""#)]
+    CString,
     #[regex(r"/\*([^*]|\**[^*/])*\*+/")]
     Comment,
     #[regex(r#"#[^\n]*\n"#)]

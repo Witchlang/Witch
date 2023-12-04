@@ -1,1 +1,1 @@
-witch__print("Hello world from libc printf")
+witch__libc_puts(c"Hello world from libc puts")

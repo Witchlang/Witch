@@ -1,4 +1,6 @@
-use alloc::{string::String, vec, vec::Vec};
+use core::ffi::c_int;
+
+use alloc::{ffi::CString, string::String, vec, vec::Vec};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Debug, Deserialize, PartialEq, Clone)]
@@ -8,6 +10,7 @@ pub enum Value {
     Error(Error),
     Bool(bool),
     String(String),
+    CString(CString),
     List(Vec<Self>),
     Function(Function),
     StackFunction {
@@ -40,6 +43,12 @@ impl From<()> for Value {
     }
 }
 
+impl From<c_int> for Value {
+    fn from(val: c_int) -> Self {
+        Value::Usize(val as usize)
+    }
+}
+
 impl From<Value> for usize {
     fn from(val: Value) -> Self {
         match val {
@@ -53,6 +62,15 @@ impl From<Value> for String {
     fn from(val: Value) -> Self {
         match val {
             Value::String(i) => i,
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl From<Value> for CString {
+    fn from(val: Value) -> Self {
+        match val {
+            Value::CString(i) => i,
             _ => unreachable!(),
         }
     }

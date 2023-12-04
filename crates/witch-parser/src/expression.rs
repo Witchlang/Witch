@@ -1,6 +1,7 @@
 use crate::types::Type;
 use crate::{ast::Key, error::Result};
 use std::collections::HashMap;
+use std::ffi::CString;
 use witch_runtime::value::Value;
 
 use super::{
@@ -22,7 +23,10 @@ pub fn expression_inner<'input>(
 ) -> Result<Ast> {
     let start = p.cursor;
     let mut expr = match p.peek() {
-        Some(lit @ Kind::Int) | Some(lit @ Kind::String) | Some(lit @ Kind::Float) => {
+        Some(lit @ Kind::Int)
+        | Some(lit @ Kind::String)
+        | Some(lit @ Kind::CString)
+        | Some(lit @ Kind::Float) => {
             let token = p.consume(&lit)?;
             let txt = p.text(&token);
             match lit {
@@ -34,6 +38,16 @@ pub fn expression_inner<'input>(
                         .strip_prefix('\"')
                         .unwrap()
                         .to_string(),
+                )),
+                Kind::CString => Ast::Value(Value::CString(
+                    CString::new(
+                        txt.strip_suffix('\"')
+                            .unwrap()
+                            .strip_prefix("c\"")
+                            .unwrap()
+                            .to_string(),
+                    )
+                    .expect("bad string to cstring conversion"),
                 )),
                 _ => unreachable!(),
             }

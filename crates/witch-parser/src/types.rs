@@ -47,6 +47,9 @@ pub enum Type {
     /// A UTF-8 encoded string.
     String,
 
+    /// A zero-terminated C string
+    CString,
+
     /// True or false
     Bool,
 
@@ -314,6 +317,7 @@ impl From<&Value> for Type {
                 }
             }
             Value::String(_) => Type::String,
+            Value::CString(_) => Type::CString,
             Value::Function(_) => Type::Unknown,
             x => todo!("{:?}", x),
         }
@@ -461,6 +465,8 @@ impl Type {
             "void" => Type::Void,
             "bool" => Type::Bool,
             "string" => Type::String,
+            "cstring" => Type::CString,
+            "c_int" => Type::I32, // TODO are there any systems where this is not true???
             "any" => Type::Any,
             "i8" => Type::I8,
             "u8" => Type::U8,
