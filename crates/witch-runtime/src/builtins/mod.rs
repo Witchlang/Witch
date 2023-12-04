@@ -26,7 +26,7 @@ macro_rules! builtins {
 
         #[cfg(feature = "compiler")]
         pub fn builtins() -> Vec<Builtin> {
-            paste! { vec![$(Builtin::new(Box::new([<$idents __fn>]))),*] }
+            paste! { vec![$(Builtin::new(Box::new([<$idents _fn>]))),*] }
         }
 
         #[cfg(feature = "compiler")]
@@ -38,13 +38,13 @@ macro_rules! builtins {
 }
 
 builtins! {
-    witch__libc_puts
+    witch_libc_puts
 }
 
 pub struct Builtin(pub Handler);
 impl Builtin {
     pub fn new<Args: 'static>(func: Box<dyn Function<Args>>) -> Self {
-        Self(Arc::new(move |vm| unsafe {
+        Self(Arc::new(move |vm| {
             (*func).fn_call(vm);
         }))
     }
@@ -53,7 +53,7 @@ impl Builtin {
 type Handler = Arc<dyn Fn(&mut Vm) + Send + Sync>;
 
 pub trait Function<Args>: 'static + Send + Sync {
-    unsafe fn fn_call(&self, vm: &mut Vm);
+    fn fn_call(&self, vm: &mut Vm);
 }
 
 impl<Func, Return> Function<()> for Func
@@ -61,7 +61,7 @@ where
     Func: 'static + Send + Sync + Fn(&mut Vm) -> Return,
     Return: Into<Value>,
 {
-    unsafe fn fn_call(&self, vm: &mut Vm) {
+    fn fn_call(&self, vm: &mut Vm) {
         let ret = self(vm);
 
         let return_value = Into::<Value>::into(ret);
@@ -75,7 +75,7 @@ where
     Return: Into<Value>,
     A: From<Value>,
 {
-    unsafe fn fn_call(&self, vm: &mut Vm) {
+    fn fn_call(&self, vm: &mut Vm) {
         let a = vm.pop_value().unwrap().into();
         let ret = self(vm, a);
 
@@ -91,7 +91,7 @@ where
     A: From<Entry>,
     B: From<Entry>,
 {
-    unsafe fn fn_call(&self, vm: &mut Vm) {
+    fn fn_call(&self, vm: &mut Vm) {
         let b = vm.stack.pop().unwrap().into();
         let a = vm.stack.pop().unwrap().into();
         let ret = self(vm, a, b);
@@ -109,7 +109,7 @@ where
 //     B: From<Value>,
 //     C: From<Value>,
 // {
-//     unsafe fn fn_call(&self, vm: &mut Vm) {
+//     fn fn_call(&self, vm: &mut Vm) {
 //         let c = vm.stack.pop_value().into();
 //         let b = vm.stack.pop_value().into();
 //         let a = vm.stack.pop_value().into();
@@ -129,7 +129,7 @@ where
 //     C: From<Entry>,
 //     D: From<Entry>,
 // {
-//     unsafe fn fn_call(&self, vm: &mut Vm) {
+//     fn fn_call(&self, vm: &mut Vm) {
 //         let d = vm.stack.pop().unwrap().into();
 //         let c = vm.stack.pop().unwrap().into();
 //         let b = vm.stack.pop().unwrap().into();
@@ -151,7 +151,7 @@ where
 //     D: From<Entry>,
 //     E: From<Entry>,
 // {
-//     unsafe fn fn_call(&self, vm: &mut Vm) {
+//     fn fn_call(&self, vm: &mut Vm) {
 //         let e = vm.stack.pop().unwrap().into();
 //         let d = vm.stack.pop().unwrap().into();
 //         let c = vm.stack.pop().unwrap().into();
@@ -175,7 +175,7 @@ where
 //     E: From<Entry>,
 //     F: From<Entry>,
 // {
-//     unsafe fn fn_call(&self, vm: &mut Vm) {
+//     fn fn_call(&self, vm: &mut Vm) {
 //         let f = vm.stack.pop().unwrap().into();
 //         let e = vm.stack.pop().unwrap().into();
 //         let d = vm.stack.pop().unwrap().into();

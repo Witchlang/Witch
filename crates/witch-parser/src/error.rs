@@ -3,6 +3,7 @@ use std::ops::Range;
 pub type Result<T> = core::result::Result<T, Error>;
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct Error {
     msg: String,
     span: Range<usize>,

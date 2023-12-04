@@ -21,11 +21,11 @@ pub fn builtin(_: TokenStream, input: TokenStream) -> TokenStream {
     // Parse the input function
     let mut input_fn = parse_macro_input!(input as ItemFn);
     let fn_name = input_fn.sig.ident.clone();
-    let var_name = format_ident!("{}__fn", &fn_name);
+    let var_name = format_ident!("{}_fn", &fn_name);
 
     // Check if the "compiler" feature flag is set
     if cfg!(feature = "compiler") {
-        // Rename the function to __fn__function_name
+        // Rename the function to function_name_fn
         input_fn.sig.ident = var_name.clone();
 
         // Arg types as str
@@ -47,7 +47,8 @@ pub fn builtin(_: TokenStream, input: TokenStream) -> TokenStream {
         let expanded = quote! {
 
             #input_fn
-
+            
+            #[allow(non_upper_case_globals)]
             pub const #fn_name: BuiltinInfo = BuiltinInfo {
                 name: stringify!(#fn_name),
                 inputs: #input_types,

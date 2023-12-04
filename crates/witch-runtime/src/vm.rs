@@ -225,7 +225,7 @@ impl Vm {
             .unwrap()
     }
 
-    fn to_value_ref(&mut self, entry: Entry) -> Rc<RefCell<Value>> {
+    fn entry_to_value_ref(&mut self, entry: Entry) -> Rc<RefCell<Value>> {
         match entry {
             Entry::Pointer(Pointer::Heap(idx)) => self.heap.get(idx),
             Entry::Usize(u) => Rc::new(RefCell::new(Value::Usize(u))),
@@ -233,14 +233,14 @@ impl Vm {
         }
     }
 
-    pub fn to_value(&mut self, entry: Entry) -> Value {
-        self.to_value_ref(entry).borrow().clone()
+    pub fn entry_to_value(&mut self, entry: Entry) -> Value {
+        self.entry_to_value_ref(entry).borrow().clone()
     }
 
     pub fn pop_value(&mut self) -> Option<Value> {
         let entry = self.stack.pop();
         if let Some(entry) = entry {
-            return Some(self.to_value(entry));
+            return Some(self.entry_to_value(entry));
         }
         None
     }
@@ -309,7 +309,7 @@ impl Vm {
             Entry::Pointer(Pointer::Vtable(p)) => self.functions[p],
             x => {
                 dbg!(&self.stack);
-                dbg!(&self.to_value(x));
+                dbg!(&self.entry_to_value(x));
                 unreachable!()
             }
         };
@@ -551,8 +551,7 @@ impl Vm {
 
                     let entry = match upv {
                         Upvalue::Closed(ptr) => Entry::Pointer(*ptr),
-                        Upvalue::Open(idx) => self.stack.get(*idx),
-                        _ => unreachable!(),
+                        Upvalue::Open(idx) => self.stack.get(*idx)
                     };
                     self.stack.push(entry);
 
@@ -572,7 +571,7 @@ impl Vm {
 
                         match self.stack.pop() {
                             Some(Entry::Usize(idx)) => idx,
-                            Some(e @ Entry::Pointer(Pointer::Heap(_))) => match self.to_value(e) {
+                            Some(e @ Entry::Pointer(Pointer::Heap(_))) => match self.entry_to_value(e) {
                                 Value::Usize(idx) => idx,
                                 x => {
                                     dbg!(&x);
@@ -633,7 +632,7 @@ impl Vm {
                             let item_ptr = self.heap.get_list_item_ptr(ptr, property_idx as usize);
                             let item = self.heap.get(item_ptr);
                             let mut item = item.borrow_mut();
-                            *item = self.to_value_ref(rhs).borrow().to_owned();
+                            *item = self.entry_to_value_ref(rhs).borrow().to_owned();
                         }
                         _ => unreachable!(),
                     }
@@ -675,9 +674,9 @@ impl Vm {
 
                         (e1 @ Entry::Pointer(_), op, e2) | (e1, op, e2 @ Entry::Pointer(_)) => {
                             match (
-                                &*self.to_value_ref(e1).borrow(),
+                                &*self.entry_to_value_ref(e1).borrow(),
                                 op,
-                                &*self.to_value_ref(e2).borrow(),
+                                &*self.entry_to_value_ref(e2).borrow(),
                             ) {
                                 (Value::Usize(a), InfixOp::Add, Value::Usize(b)) => {
                                     Entry::Usize(a + b)
@@ -723,7 +722,7 @@ impl Vm {
                             self.frame_mut().ip = *addr;
                         }
                         x => {
-                            dbg!(&self.to_value(*x));
+                            dbg!(&self.entry_to_value(*x));
                             unreachable!()
                         }
                     }
@@ -809,7 +808,7 @@ impl Vm {
 
         // When the script exits, return whatever is on the top of the stack
         if let Some(entry) = self.stack.pop() {
-            let value = self.to_value_ref(entry);
+            let value = self.entry_to_value_ref(entry);
             Ok((*value).clone().borrow().to_owned())
         } else {
             Ok(Value::Void)

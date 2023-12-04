@@ -1,1 +1,1 @@
-witch__libc_puts(c"Hello world from libc puts")
+witch_libc_puts(c"Hello world from libc puts")

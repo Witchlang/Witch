@@ -23,11 +23,11 @@ fn builtins() {
     use witch_compiler::compile;
     use witch_runtime::value::Value;
 
-    let expected = Value::Void;
     let bytecode = compile(PathBuf::from("tests/fixtures/builtins.witch")).unwrap();
     let mut vm = Vm::new();
     let result = vm.run(bytecode).unwrap();
-    assert_eq!(expected, result);
+    // We run libc's "puts" which returns any positive number on success
+    assert!(matches!(result, Value::Usize(x) if x > 0));
 }
 
 #[cfg(feature = "compiler")]
