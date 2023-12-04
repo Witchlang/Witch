@@ -1,13 +1,8 @@
 use super::{type_system::TypeSystem, LocalVariable};
 use crate::error::{Error, Result};
 use anyhow::anyhow;
-use anyhow::Context as ErrorContext;
-use std::{
-    collections::HashMap,
-    path::{Component, PathBuf},
-};
-use witch_parser::{types::Type, Ast, Parser};
-use witch_runtime::builtins::BuiltinInfo;
+use std::path::PathBuf;
+use witch_parser::{types::Type, Ast};
 use witch_runtime::vm::Op;
 
 #[derive(Debug, Clone, PartialEq)]

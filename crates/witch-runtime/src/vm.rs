@@ -551,7 +551,7 @@ impl Vm {
 
                     let entry = match upv {
                         Upvalue::Closed(ptr) => Entry::Pointer(*ptr),
-                        Upvalue::Open(idx) => self.stack.get(*idx)
+                        Upvalue::Open(idx) => self.stack.get(*idx),
                     };
                     self.stack.push(entry);
 
@@ -571,13 +571,15 @@ impl Vm {
 
                         match self.stack.pop() {
                             Some(Entry::Usize(idx)) => idx,
-                            Some(e @ Entry::Pointer(Pointer::Heap(_))) => match self.entry_to_value(e) {
-                                Value::Usize(idx) => idx,
-                                x => {
-                                    dbg!(&x);
-                                    unreachable!()
+                            Some(e @ Entry::Pointer(Pointer::Heap(_))) => {
+                                match self.entry_to_value(e) {
+                                    Value::Usize(idx) => idx,
+                                    x => {
+                                        dbg!(&x);
+                                        unreachable!()
+                                    }
                                 }
-                            },
+                            }
                             x => {
                                 dbg!(&x);
                                 unreachable!();
@@ -587,7 +589,7 @@ impl Vm {
                     if let Some(entry) = self.stack.last_mut() {
                         *entry = match entry {
                             Entry::Pointer(Pointer::Heap(ptr)) => Entry::Pointer(Pointer::Heap(
-                                self.heap.get_list_item_ptr(*ptr, idx as usize),
+                                self.heap.get_list_item_ptr(*ptr, idx),
                             )),
                             x => {
                                 dbg!(&x);

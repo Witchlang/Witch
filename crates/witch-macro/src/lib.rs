@@ -47,7 +47,7 @@ pub fn builtin(_: TokenStream, input: TokenStream) -> TokenStream {
         let expanded = quote! {
 
             #input_fn
-            
+
             #[allow(non_upper_case_globals)]
             pub const #fn_name: BuiltinInfo = BuiltinInfo {
                 name: stringify!(#fn_name),
