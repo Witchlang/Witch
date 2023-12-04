@@ -20,3 +20,13 @@ function iter[T](data: T) -> Iterator[T] {
         data
     }
 }
+
+interface ToString {
+    to_string: () -> string
+}
+
+function print[T](input: T) -> void where T: ToString {
+    let str = input.to_string()
+    let c_str = witch_conv_string_to_cstring(str)
+    witch_libc_puts(c_str)
+}

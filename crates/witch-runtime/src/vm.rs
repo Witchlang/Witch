@@ -805,9 +805,6 @@ impl Vm {
                 .or_insert((opcode_timer_start.elapsed().as_nanos(), 1));
         }
 
-        #[cfg(feature = "debug")]
-        println!("program exit with stack len {}", self.stack.len());
-
         // When the script exits, return whatever is on the top of the stack
         if let Some(entry) = self.stack.pop() {
             let value = self.entry_to_value_ref(entry);
