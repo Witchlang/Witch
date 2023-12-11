@@ -102,6 +102,12 @@ pub enum Type {
     /// 64-bit floating point number
     F64,
 
+    /// A not-yet-compiled function residing within the context, waiting for monomorphization
+    GenericFunctionStub {
+        scope: usize,
+        idx: usize
+    },
+
     /// A function
     Function {
         /// List of argument types
@@ -382,7 +388,7 @@ impl Type {
     }
 
     pub fn requires_binding(&self) -> bool {
-        matches!(self, Type::Interface { .. } | Type::Intersection { .. })
+        matches!(self, Type::Interface { .. } | Type::Intersection { .. } )
     }
 
     pub fn implements(&self, properties: &HashMap<String, Self>) -> bool {

@@ -182,6 +182,36 @@ fn call(ctx: &mut Context, expr: &Box<Ast>, args: &Vec<Ast>) -> Result<(Vec<u8>,
 
     let (mut bc, mut called_type) = compile(ctx, expr)?;
 
+    // If we're calling a function stub, it needs to undergo monomorphization
+    if let Type::GenericFunctionStub { scope, idx } = called_type {
+        let mut function_ast = ctx.scope_by_index(scope)?.generic_functions[idx].clone();
+        if let Ast::Function { ref is_variadic, ref args, ref returns, ref body, ref mut generics } = function_ast {
+            for (arg_idx, (_, arg_typ)) in args_with_types.iter().enumerate() {
+
+                ctx.push_type_scope(&generics);
+                dbg!(&ctx.ts.resolve(args[arg_idx].1.clone())?);
+    
+                if ctx.ts.resolve(arg_typ.clone())? != ctx.ts.resolve(args[arg_idx].1.clone())? {
+                    panic!(
+                        "type error: generic function arg {} expected type {:?}, got {:?}",
+                        args[arg_idx].0, ctx.ts.resolve(args[arg_idx].1.clone())?, arg_typ
+                    );
+                }
+                if let Type::TypeVar(ident) = args[arg_idx].1.clone() {
+                    generics.iter_mut().find(|g| g.0 == ident).replace(&mut (ident, arg_typ.clone()));
+                }
+
+                ctx.pop_type_scope();
+    
+            }
+
+            dbg!(&function_ast);
+    
+        }
+
+    }
+
+
     // If this is being called on a Member expression, that means a method call.
     // Method call means we have an implicit `self` variable as a first argument.
     // Let's stick the Entry object on the stack before the arguments then.
@@ -196,6 +226,8 @@ fn call(ctx: &mut Context, expr: &Box<Ast>, args: &Vec<Ast>) -> Result<(Vec<u8>,
     }
 
     bytecode.append(&mut args_bytecode);
+
+
 
     // This handles the recursion edge case. When we're calling a function recursively, it's not actually bound to the
     // variable name at the time of compiling the function body, so the variable we're calling is undefined at this point.
@@ -300,8 +332,8 @@ fn function(
     body: &Box<Ast>,
     generics: &Vec<(String, Type)>,
 ) -> Result<(Vec<u8>, Type)> {
-    ctx.push_type_scope(generics);
 
+    
     let is_method = if let Ast::Type {
         decl: TypeDecl::Struct { .. },
         ..
@@ -312,6 +344,26 @@ fn function(
         false
     };
 
+    ctx.push_type_scope(generics);
+
+    // If this is a generic function which is not a method (because methods have their generics handled by the encompassing struct)
+    // and not all type variables are concrete, we stash this away for later monomorphization instead of compiling it. 
+    if !is_method && generics.iter().any(|(_, g)| ctx.ts.is_abstract(g)) {
+        ctx.pop_type_scope();
+        ctx.scope()?.generic_functions.push(Ast::Function {
+            is_variadic: *is_variadic,
+            args: args.to_vec(),
+            returns: returns.clone(),
+            body: body.clone(),
+            generics: generics.to_vec(),
+        });
+        return Ok((vec![], Type::GenericFunctionStub {
+            scope: ctx.scopes.len()-1,
+            idx: ctx.scope()?.generic_functions.len()-1
+        }));
+    }
+    
+    
     let ty = Type::Function {
         args: args.iter().map(|a| a.1.clone()).collect(),
         returns: Box::new(returns.clone()),
@@ -798,6 +850,7 @@ fn let_(
 
     let (assignment_bytes, mut assignment_type) = compile(ctx, expr)?;
 
+    
     // If the original type is Unknown, update the local var with the assignment type
     // If it isn't, conduct a type check.
     match ctx.ts.resolve(ty)? {
@@ -815,7 +868,7 @@ fn let_(
             assignment_type = ty;
         }
     }
-
+    
     ctx.assignment_ctx = old_assignment_ctx;
     Ok((assignment_bytes, assignment_type))
 }

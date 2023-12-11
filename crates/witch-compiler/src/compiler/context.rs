@@ -16,6 +16,7 @@ pub struct Upvalue {
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct Scope {
     pub locals: Vec<LocalVariable>,
+    pub generic_functions: Vec<Ast>,
     pub upvalues: Vec<Upvalue>,
 }
 

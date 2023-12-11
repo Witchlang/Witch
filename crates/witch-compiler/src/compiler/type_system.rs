@@ -86,9 +86,7 @@ impl TypeSystem {
                 self.is_abstract(returns)
             }
             Type::TypeVar(name) => self.is_abstract(self.types.get(name).unwrap()),
-            _ => {
-                todo!();
-            }
+            _ => false
         }
     }
 

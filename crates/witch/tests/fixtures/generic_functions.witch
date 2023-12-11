@@ -1,0 +1,15 @@
+interface ToString {
+    to_string: () -> string
+}
+
+function print[Tx](input: Tx) -> void where Tx: ToString {
+    let str = input.to_string()
+    let c_str = witch_conv_string_to_cstring(str)
+    witch_libc_puts(c_str)
+}
+
+print("hello")
+
+# [x] when compiling function, if any input or output is abstract, this function requires monomorphization
+# [x] If so, put it in a list of stubs for this scope and return_type is a reference to its index, which gets stashed in the variable
+# [ ] When called, fetch the function by index, handle substitutions, cache the resulting function in the vtable and put getfunction on the stack
