@@ -85,8 +85,11 @@ impl TypeSystem {
                 }
                 self.is_abstract(returns)
             }
-            Type::TypeVar(name) => self.is_abstract(self.types.get(name).unwrap()),
-            _ => false
+            Type::TypeVar(name) => self.is_abstract(self.types.get(name).unwrap_or_else(|| {
+                dbg!(name);
+                panic!();
+            })),
+            _ => false,
         }
     }
 

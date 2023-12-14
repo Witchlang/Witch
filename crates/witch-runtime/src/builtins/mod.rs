@@ -41,7 +41,8 @@ macro_rules! builtins {
 
 builtins! {
     witch_libc_puts,
-    witch_conv_cstring_to_string
+    witch_conv_cstring_to_string,
+    witch_conv_string_to_cstring
 }
 
 pub struct Builtin(pub Handler);

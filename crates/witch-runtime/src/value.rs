@@ -55,6 +55,12 @@ impl From<CString> for Value {
     }
 }
 
+impl From<String> for Value {
+    fn from(val: String) -> Self {
+        Value::String(val)
+    }
+}
+
 impl From<Value> for usize {
     fn from(val: Value) -> Self {
         match val {

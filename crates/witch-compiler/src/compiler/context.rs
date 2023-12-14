@@ -1,7 +1,7 @@
 use super::{type_system::TypeSystem, LocalVariable};
 use crate::error::{Error, Result};
 use anyhow::anyhow;
-use std::path::PathBuf;
+use std::{collections::HashMap, path::PathBuf};
 use witch_parser::{types::Type, Ast};
 use witch_runtime::vm::Op;
 
@@ -16,7 +16,7 @@ pub struct Upvalue {
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct Scope {
     pub locals: Vec<LocalVariable>,
-    pub generic_functions: Vec<Ast>,
+    pub generic_functions: Vec<(String, Ast)>,
     pub upvalues: Vec<Upvalue>,
 }
 
@@ -33,16 +33,6 @@ impl Scope {
 
         self.upvalues.push(Upvalue { index, is_local });
         Some(self.upvalues.len() - 1)
-    }
-
-    /// Convenience function to get the index number and data of a local variable
-    pub fn get_local(&self, ident: &str) -> Option<(usize, LocalVariable)> {
-        for (i, local) in self.locals.iter().enumerate() {
-            if local.name == ident {
-                return Some((i, local.clone()));
-            }
-        }
-        None
     }
 }
 
@@ -137,6 +127,20 @@ impl<'a> Context<'a> {
             .cloned()
     }
 
+    pub fn get_local(&mut self, ident: &str) -> Option<(usize, LocalVariable)> {
+        let offset = if self.scopes.len() == 1 {
+            self.stack_offset()
+        } else {
+            0
+        };
+        for (i, local) in self.scope().unwrap().locals.iter().enumerate() {
+            if local.name == *ident {
+                return Some(((offset + i), local.to_owned()));
+            }
+        }
+        None
+    }
+
     /// Retrieves the builtin index and its type signature, if it exists
     pub fn get_builtin(&self, ident: &str) -> Option<(usize, Type)> {
         witch_runtime::builtins::builtins_info()
@@ -145,52 +149,6 @@ impl<'a> Context<'a> {
             .find(|(idx, b)| b.name == ident)
             .map(|(idx, b)| (idx, Type::from(b)))
     }
-
-    /// Handles importing of other Witch modules
-    ///
-    // pub fn resolve_import(&mut self, mut path: PathBuf) -> Result<Module> {
-    //     if !path.ends_with(".witch") {
-    //         path.set_extension("witch");
-    //     }
-
-    //     // Bail early if this module is already imported
-    //     if let Some(module) = self.imports.iter().find(|m| m.path == path) {
-    //         return Ok(module.clone());
-    //     }
-
-    //     // Deduce whether path is relative to the entry module or abstract
-    //     // - If it starts with `witch`, it's the std library
-    //     // - If it starts with ./, its local
-    //     // - If it just starts with an identifier, its a Grimoire package (TODO)
-    //     let module_file_path = match path.components().next() {
-    //         Some(Component::Normal(x)) => todo!("{:?}", x),
-    //         Some(Component::CurDir) => self.root_path.parent().unwrap().join(path).canonicalize(),
-    //         _ => panic!("very bad module path"),
-    //     }
-    //     .expect("oh no");
-
-    //     let source = std::fs::read_to_string(module_file_path.clone()).with_context(|| {
-    //         format!(
-    //             "Failed to read file {}",
-    //             module_file_path.clone().to_string_lossy()
-    //         )
-    //     })?;
-
-    //     let mut parser = Parser::new(&source);
-    //     let module_ast = parser.file().expect("module parser error");
-
-    //     let mut module_context = Context::new(module_file_path.clone());
-    //     let (module_bytecode, _) = crate::compiler::compile(&mut module_context, &module_ast)?;
-
-    //     let module = Module {
-    //         path: module_file_path,
-    //         context: module_context,
-    //         bytecode: module_bytecode,
-    //     };
-    //     self.imports.push(module.clone());
-
-    //     Ok(module)
-    // }
 
     pub fn scope(&mut self) -> Result<&mut Scope> {
         self.scopes.last_mut().ok_or(anyhow!(Error::fatal()))
@@ -221,6 +179,17 @@ impl<'a> Context<'a> {
 
     pub fn pop_type_scope(&mut self) {
         self.ts.pop_scope()
+    }
+
+    pub fn resolve_generic_function(&mut self, ident: &str) -> Option<(usize, usize)> {
+        for (scope_idx, scope) in self.scopes.iter().enumerate() {
+            for idx in 0..scope.generic_functions.len() {
+                if scope.generic_functions[idx].0 == ident {
+                    return Some((scope_idx, idx));
+                }
+            }
+        }
+        None
     }
 
     /// For non-local variables, we recursively walk upwards from our current scope until we find it.

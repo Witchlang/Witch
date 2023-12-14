@@ -1,2 +1,2 @@
-let cstr = witch_conv_cstring_to_string("Hello world!")
+let cstr = witch_conv_string_to_cstring("Hello world!")
 witch_libc_puts(cstr)
