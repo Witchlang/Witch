@@ -104,13 +104,8 @@ fn assignment(
 
     let (mut expr_bytes, expr_type) = compile(ctx, rhs)?;
 
-    if let Some((local_variable, local)) = ctx.scope()?.get_local(&ident) {
-        let offset = if ctx.scopes.len() == 1 {
-            ctx.stack_offset()
-        } else {
-            0
-        };
-        if let Ok(local_variable) = u8::try_from(offset + local_variable) {
+    if let Some((local_variable, local)) = ctx.get_local(&ident) {
+        if let Ok(local_variable) = u8::try_from(local_variable) {
             let var_type = ctx.ts.resolve(local.r#type.clone())?;
 
             match (member_key, &var_type) {
@@ -181,6 +176,65 @@ fn call(ctx: &mut Context, expr: &Box<Ast>, args: &Vec<Ast>) -> Result<(Vec<u8>,
     }
 
     let (mut bc, mut called_type) = compile(ctx, expr)?;
+
+    // If we're calling a function stub, it needs to undergo monomorphization
+    if let Type::GenericFunctionStub { scope, idx } = called_type {
+        let (_, mut function_ast) = ctx.scope_by_index(scope)?.generic_functions[idx].clone();
+        if let Ast::Function {
+            ref is_variadic,
+            ref args,
+            ref returns,
+            ref body,
+            ref mut generics,
+        } = function_ast
+        {
+            ctx.push_type_scope(&generics);
+            for (caller_arg_idx, (_, caller_arg_typ)) in args_with_types.iter().enumerate() {
+                //ctx.push_type_scope(&generics);
+                //dbg!(&ctx.ts.resolve(args[arg_idx].1.clone())?);
+
+                // if ctx.ts.resolve(arg_typ.clone())? != ctx.ts.resolve(args[arg_idx].1.clone())? {
+
+                // }
+                if let Type::TypeVar(ident) = args[caller_arg_idx].1.clone() {
+                    // If the arg is a typevar, check the function generics for it
+
+                    // If theres a match, replace with our caller type (or error if wrong type)
+                    if let Some((i, (n, t))) =
+                        generics.iter_mut().enumerate().find(|(_, g)| g.0 == ident)
+                    {
+                        // Caller type matches the generic constraint
+                        if caller_arg_typ == &ctx.ts.resolve(t.to_owned())? {
+                            generics[i] = (n.to_owned(), caller_arg_typ.clone());
+                        } else {
+                            panic!(
+                                "type error: generic function arg {} expected type {:?}, got {:?}",
+                                args[caller_arg_idx].0,
+                                ctx.ts.resolve(args[caller_arg_idx].1.clone())?,
+                                caller_arg_typ
+                            );
+                        }
+                    }
+                }
+
+                ctx.pop_type_scope();
+            }
+
+            // Compile the new function AST
+            let (impl_bytecode, impl_type) = compile(ctx, &function_ast)?;
+
+            // Cache it
+            let impl_idx = ctx.cache_fn(impl_bytecode);
+            // Emit a getfunction OP to put it on the stack
+            bc = vec![];
+            bc.push(Op::GetFunction as u8);
+            bc.push((ctx.vtable_offset() + impl_idx) as u8);
+
+            called_type = impl_type;
+
+            // And keep going
+        }
+    }
 
     // If this is being called on a Member expression, that means a method call.
     // Method call means we have an implicit `self` variable as a first argument.
@@ -300,8 +354,6 @@ fn function(
     body: &Box<Ast>,
     generics: &Vec<(String, Type)>,
 ) -> Result<(Vec<u8>, Type)> {
-    ctx.push_type_scope(generics);
-
     let is_method = if let Ast::Type {
         decl: TypeDecl::Struct { .. },
         ..
@@ -311,6 +363,31 @@ fn function(
     } else {
         false
     };
+
+    ctx.push_type_scope(generics);
+
+    // If this is a generic function which is not a method (because methods have their generics handled by the encompassing struct)
+    // and not all type variables are concrete, we stash this away for later monomorphization instead of compiling it.
+    if !is_method && generics.iter().any(|(_, g)| ctx.ts.is_abstract(g)) {
+        ctx.pop_type_scope();
+        ctx.scope()?.generic_functions.push((
+            "<generic function name placeholder>".to_string(),
+            Ast::Function {
+                is_variadic: *is_variadic,
+                args: args.to_vec(),
+                returns: returns.clone(),
+                body: body.clone(),
+                generics: generics.to_vec(),
+            },
+        ));
+        return Ok((
+            vec![],
+            Type::GenericFunctionStub {
+                scope: ctx.scopes.len() - 1,
+                idx: ctx.scope()?.generic_functions.len() - 1,
+            },
+        ));
+    }
 
     let ty = Type::Function {
         args: args.iter().map(|a| a.1.clone()).collect(),
@@ -798,6 +875,12 @@ fn let_(
 
     let (assignment_bytes, mut assignment_type) = compile(ctx, expr)?;
 
+    if let Type::GenericFunctionStub { scope, idx } = assignment_type.clone() {
+        ctx.scope_by_index(scope)?.generic_functions[idx].0 = ident.to_owned();
+        ctx.scope()?.locals.pop();
+        return Ok((vec![], assignment_type));
+    }
+
     // If the original type is Unknown, update the local var with the assignment type
     // If it isn't, conduct a type check.
     match ctx.ts.resolve(ty)? {
@@ -864,22 +947,7 @@ fn value(_ctx: &mut Context, value: &Value) -> Result<(Vec<u8>, Type)> {
 /// we grab the index by the provided name and emit <Get><stack-index>.
 fn var(ctx: &mut Context, ident: &String) -> Result<(Vec<u8>, Type)> {
     // Find a local var with the right name, get its index
-    let mut local_variable = None;
-
-    // First check all variables local to us
-    // If we're in the global scope, we need to take the module's stack offset into account. If not, the position is relative
-    // to the current functions stack_start, based on its arity and where its called
-    let offset = if ctx.scopes.len() == 1 {
-        ctx.stack_offset()
-    } else {
-        0
-    };
-    for (i, local) in ctx.scope()?.locals.iter().enumerate() {
-        if local.name == *ident {
-            local_variable = Some((offset + i, local.to_owned()));
-            break;
-        }
-    }
+    let mut local_variable = ctx.get_local(ident);
 
     // If not found, check the <prelude> module as well. It has no stack offset since its.. the prelude.
     if local_variable.is_none() {
@@ -900,6 +968,8 @@ fn var(ctx: &mut Context, ident: &String) -> Result<(Vec<u8>, Type)> {
             return Ok((vec![Op::Get as u8, idx], return_type));
         }
         unreachable!()
+    } else if let Some((scope, idx)) = ctx.resolve_generic_function(ident) {
+        return Ok((vec![], Type::GenericFunctionStub { scope, idx }));
     } else if let Some((idx, return_type)) = ctx.resolve_upvalue(ident, ctx.scopes.len() - 1)? {
         return Ok((vec![Op::GetUpvalue as u8, idx as u8], return_type));
     } else if let Some((idx, return_type)) = ctx.get_builtin(ident) {

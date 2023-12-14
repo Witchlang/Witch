@@ -20,5 +20,4 @@ fn run(file_path: &str) {
     let bytecode = compile(PathBuf::from(file_path)).unwrap();
     let mut vm = Vm::new();
     let result = vm.run(bytecode).unwrap();
-    dbg!(result);
 }

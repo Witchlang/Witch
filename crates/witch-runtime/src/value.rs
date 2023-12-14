@@ -49,6 +49,18 @@ impl From<c_int> for Value {
     }
 }
 
+impl From<CString> for Value {
+    fn from(val: CString) -> Self {
+        Value::CString(val)
+    }
+}
+
+impl From<String> for Value {
+    fn from(val: String) -> Self {
+        Value::String(val)
+    }
+}
+
 impl From<Value> for usize {
     fn from(val: Value) -> Self {
         match val {

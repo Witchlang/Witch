@@ -1,0 +1,19 @@
+interface ToString {
+    to_string: () -> string
+}
+
+struct Stringy {
+    content: string
+
+    function to_string() -> string {
+        return self.content
+    }
+}
+
+function stringify[Tx](input: Tx) -> string where Tx: ToString {
+    return input.to_string()
+}
+
+let x = new Stringy { content: "hello" }
+stringify(x)
+

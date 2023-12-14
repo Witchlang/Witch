@@ -41,7 +41,9 @@ pub fn builtin(_: TokenStream, input: TokenStream) -> TokenStream {
             .collect::<Vec<String>>()
             .join(",");
 
-        let output_type = extract_output_type(&input_fn.sig.output).to_string();
+        let output_type = extract_output_type(&input_fn.sig.output)
+            .to_string()
+            .to_lowercase();
 
         // If the feature flag is set, generate the static variable
         let expanded = quote! {
