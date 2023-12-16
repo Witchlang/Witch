@@ -2,6 +2,7 @@ use super::BuiltinInfo;
 use crate::vm::Vm;
 use witch_macro::builtin;
 
+use alloc::string::String;
 use alloc::ffi::CString;
 
 #[builtin]

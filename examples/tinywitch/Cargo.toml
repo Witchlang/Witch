@@ -1,7 +1,10 @@
 [package]
-name = "tiny_runtime"
+name = "tinywitch"
 edition = "2021"
 version = "0.1.0"
+
+[lib]
+crate-type = ["staticlib"]
 
 [dependencies.witch_runtime]
 path = "../../crates/witch-runtime"
