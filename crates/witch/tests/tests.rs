@@ -16,6 +16,22 @@ fn basic() {
 
 #[cfg(feature = "compiler")]
 #[test]
+fn enums_and_match() {
+    use std::path::PathBuf;
+
+    use witch::Vm;
+    use witch_compiler::compile;
+    use witch_runtime::value::Value;
+
+    let expected = Value::Bool(true);
+    let bytecode = compile(PathBuf::from("tests/fixtures/enums.witch")).unwrap();
+    let mut vm = Vm::new();
+    let result = vm.run(bytecode).unwrap();
+    assert_eq!(expected, result);
+}
+
+#[cfg(feature = "compiler")]
+#[test]
 fn builtins() {
     use std::path::PathBuf;
 

@@ -1,0 +1,23 @@
+enum Foobar {
+    Foo,
+    Bar,
+    Baz(usize)
+}
+
+enum Option[T] {
+    Some(T),
+    None
+}
+
+let x = Some("hello)
+
+function has_string(maybe_string: Option[string]) -> bool {
+    match maybe_string {
+        Some(str) => {
+            return true
+        }
+        _ => return false
+    }
+}
+
+has_string(x)
