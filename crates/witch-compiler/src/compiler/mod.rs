@@ -11,7 +11,7 @@ use crate::error::Result;
 
 use context::{Context, Scope};
 use witch_parser::ast::{Ast, Key, Operator};
-use witch_parser::types::{Type, TypeDecl};
+use witch_parser::types::{EnumVariant, Type, TypeDecl};
 
 use witch_runtime::value::{Function, Value};
 use witch_runtime::vm::Op;
@@ -707,12 +707,12 @@ fn struct_literal(
     // if named, look up the type and field types
     if let Some(name) = ident {
         // This is a named struct. make sure the type is defined
-        if let Type::Struct {
+        if let Some(Type::Struct {
             ref fields,
             generics: ref g,
             methods: ref m,
             ..
-        } = ctx.get_type(name)
+        }) = ctx.get_type(name)
         {
             field_types = fields.clone();
             methods = m.clone();
@@ -780,11 +780,11 @@ fn decl_type(
     _span: &Range<usize>,
 ) -> Result<(Vec<u8>, Type)> {
     match decl {
-        TypeDecl::Enum {
-            variants,
-            generics: _,
-        } => {
-            let typ = Type::Enum(variants.clone());
+        TypeDecl::Enum { variants, generics } => {
+            let typ = Type::Enum {
+                variants: variants.to_owned(),
+                generics: generics.to_owned(),
+            };
             ctx.add_type(name.to_string(), typ.clone())?;
             Ok((vec![], typ))
         }
@@ -974,6 +974,41 @@ fn var(ctx: &mut Context, ident: &String) -> Result<(Vec<u8>, Type)> {
         return Ok((vec![Op::GetUpvalue as u8, idx as u8], return_type));
     } else if let Some((idx, return_type)) = ctx.get_builtin(ident) {
         return Ok((vec![Op::GetBuiltin as u8, idx as u8], return_type));
+    } else if let Some(typ) = ctx.get_type(ident) {
+        // If the "var" is actually a type, it can be a couple of things.
+        // 1) An enum variant, which is either a *variant constructor* if it holds other values,
+        // or 2) just a value itself if it doesnt
+
+        match typ.clone() {
+            // Type constructor
+            Type::EnumVariant(EnumVariant {
+                types: Some(types), ..
+            }) if types.len() > 0 => {
+                // Make sure we get called and with the right amount of arguments.
+                if !matches!(
+                    ctx.lineage[ctx.lineage.len() - (2 + types.len())],
+                    Ast::Call { .. }
+                ) {
+                    panic!("this type can only be used as a constructor in a calling context");
+                }
+
+                return Ok((vec![], typ));
+            }
+            // Enum value, no constructing needed
+            Type::EnumVariant(variant) => {
+                let (bc, _) = compile(
+                    ctx,
+                    &Ast::Value(Value::Enum {
+                        discriminant: variant.discriminant,
+                        values: vec![],
+                    }),
+                )?;
+                return Ok((bc, typ));
+            }
+            _ => {
+                panic!("using types other than enum variants in this placement is not supported!");
+            }
+        }
     } else {
         dbg!(ident);
         todo!();

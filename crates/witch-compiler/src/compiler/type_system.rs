@@ -11,12 +11,15 @@
 use crate::error::{Error, Result};
 use anyhow::anyhow;
 use std::collections::HashMap;
-use witch_parser::types::Type;
+use witch_parser::types::{EnumVariant, Type};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct TypeSystem {
     /// Types are global for a module context
     pub types: HashMap<String, Type>,
+
+    /// Variants are global for a module context. Tracked by variant name, and (parent_type, variant data)
+    pub variants: HashMap<String, (String, EnumVariant)>,
 
     /// Variable mappings. These are used to enhance types from abstract
     /// into more concrete.
@@ -38,6 +41,7 @@ impl TypeSystem {
             )]
             .into_iter()
             .collect(),
+            variants: HashMap::default(),
             substitutions: vec![HashMap::default()],
         }
     }
@@ -45,8 +49,18 @@ impl TypeSystem {
     /// Adds a type to the type library, unless it already exists
     pub fn add_type(&mut self, name: String, typ: Type) -> Result<()> {
         self.types
-            .try_insert(name, typ)
+            .try_insert(name.clone(), typ.clone())
             .map_err(|_| Error::fatal())?;
+
+        // For Enums, we also reserve their variants to keep track of them separately, and avoid name collisions
+        if let Type::Enum { ref variants, .. } = typ {
+            for variant in variants.iter() {
+                self.variants
+                    .try_insert(variant.name.clone(), (name.clone(), variant.clone()))
+                    .map_err(|_| Error::fatal())?;
+            }
+        }
+
         Ok(())
     }
 
@@ -209,6 +223,23 @@ impl TypeSystem {
                             generics,
                         })
                     }
+
+                    Type::Enum { variants, generics } => {
+                        if subs.len() != generics.len() {
+                            panic!("generic params must be of same length as available generics");
+                        }
+
+                        let generics = generics
+                            .into_iter()
+                            .enumerate()
+                            .map(|(idx, (n, _))| {
+                                let t = self.resolve(subs[idx].clone())?;
+                                Ok((n.clone(), t))
+                            })
+                            .collect::<Result<Vec<(String, Type)>>>()?;
+
+                        self.resolve(Type::Enum { variants, generics })
+                    }
                     Type::List(_) => {
                         if subs.len() != 1 {
                             panic!("list type only allows one single generic param");
@@ -225,7 +256,11 @@ impl TypeSystem {
 
     /// Gets a defined type if it exists
     pub fn get_type(&self, name: &str) -> Option<Type> {
-        self.types.get(name).cloned()
+        self.types.get(name).cloned().or_else(|| {
+            self.variants
+                .get(name)
+                .map(|(_, v)| Type::EnumVariant(v.clone()))
+        })
     }
 }
 

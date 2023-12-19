@@ -20,6 +20,10 @@ pub enum Value {
         upvalues_refs_idx: usize,
     },
     NativeFunction(usize),
+    Enum {
+        discriminant: usize,
+        values: Vec<Self>,
+    },
     I8(i8),
     U8(u8),
     I16(i16),

@@ -168,7 +168,7 @@ pub fn properties<'input>(
 }
 
 /// Parses an enum declaration:
-/// enum MyEnum<T,U> where T: Iterator {
+/// enum MyEnum[T,U] where T: Iterator {
 ///   One(T),
 ///   Two,
 ///   Three(U)
@@ -183,11 +183,11 @@ pub fn enum_declaration<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result
     let name = p.text(&token).to_string();
 
     // Possibly type variables
-    // <T, U>
-    let type_vars = if let Some(Kind::LAngle) = p.peek() {
-        p.consume(&Kind::LAngle)?;
+    // [T, U]
+    let type_vars = if let Some(Kind::LSquare) = p.peek() {
+        p.consume(&Kind::LSquare)?;
         let vars = p.repeating(vec![], Kind::Ident, Some(Kind::Comma))?;
-        p.consume(&Kind::RAngle)?;
+        p.consume(&Kind::RSquare)?;
         vars.iter()
             .map(|t| p.text(t).to_string())
             .collect::<Vec<String>>()
@@ -198,19 +198,19 @@ pub fn enum_declaration<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result
     // Possibly constraints for the type variables
     let constraints = where_constraints(p)?;
 
-    let mut generics = HashMap::default();
+    let mut generics = vec![];
     for v in type_vars.into_iter() {
-        generics.insert(v, Type::Any);
-    }
-    for (k, v) in constraints.into_iter() {
-        generics.entry(k).and_modify(|e| *e = v);
+        generics.push((
+            v.clone(),
+            constraints.get(&v).unwrap_or(&Type::Any).to_owned(),
+        ));
     }
 
     // Start the block
     p.consume(&Kind::LBrace)?;
 
     // List variants
-    let variants = enum_variants(p, vec![])?;
+    let variants = enum_variants(p, name.clone(), vec![])?;
 
     // Last variant may have an automatic semicolon. Disregard it.
     if p.at(Kind::Semicolon) {
@@ -374,6 +374,7 @@ fn function_signature<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<T
 /// ```
 pub fn enum_variants<'input>(
     p: &mut Parser<'input, Lexer<'input>>,
+    parent: String,
     mut variants: Vec<EnumVariant>,
 ) -> Result<Vec<EnumVariant>> {
     match p.peek() {
@@ -383,25 +384,40 @@ pub fn enum_variants<'input>(
             match p.peek() {
                 Some(Kind::Comma) => {
                     p.consume(&Kind::Comma)?;
-                    enum_variants(p, variants)
+                    variants.push(EnumVariant {
+                        parent: parent.clone(),
+                        name,
+                        discriminant: variants.len(),
+                        types: None,
+                    });
+                    enum_variants(p, parent, variants)
                 }
                 Some(Kind::LParen) => {
                     p.consume(&Kind::LParen)?;
                     let types = list_types(p, vec![])?;
                     variants.push(EnumVariant {
+                        parent: parent.clone(),
                         name,
                         discriminant: variants.len(),
                         types: Some(types),
                     });
                     p.consume(&Kind::RParen)?;
-                    enum_variants(p, variants)
+                    enum_variants(p, parent, variants)
                 }
-                _ => Ok(variants),
+                _ => {
+                    variants.push(EnumVariant {
+                        parent: parent.clone(),
+                        name,
+                        discriminant: variants.len(),
+                        types: None,
+                    });
+                    Ok(variants)
+                }
             }
         }
         Some(Kind::Comma) => {
             p.consume(&Kind::Comma)?;
-            enum_variants(p, variants)
+            enum_variants(p, parent, variants)
         }
         _ => Ok(variants),
     }

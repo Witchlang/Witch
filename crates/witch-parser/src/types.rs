@@ -19,7 +19,7 @@ pub enum TypeDecl {
         properties: HashMap<String, Type>,
     },
     Enum {
-        generics: HashMap<String, Type>,
+        generics: Vec<(String, Type)>,
         variants: Vec<EnumVariant>,
     },
 }
@@ -32,6 +32,7 @@ pub enum Index {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct EnumVariant {
+    pub parent: String,
     pub name: String,
     pub discriminant: usize,
     pub types: Option<Vec<Type>>,
@@ -161,7 +162,10 @@ pub enum Type {
 
     /// An enum is simply a list of its variants.
     /// You can't instantiate an enum without a variant.
-    Enum(Vec<EnumVariant>),
+    Enum {
+        variants: Vec<EnumVariant>,
+        generics: Vec<(String, Self)>,
+    },
 
     /// An enum variant holds its name, discriminant, associated data types,
     /// as well as any generics used
@@ -282,8 +286,8 @@ impl PartialEq for Type {
 
             // Checks whether an Enum Variant is of type Enum.
             // E.g. MyEnum.One == MyEnum
-            (Type::Enum(variants), Type::EnumVariant(variant)) => variants.contains(variant),
-            (Type::EnumVariant(variant), Type::Enum(variants)) => variants.contains(variant),
+            (Type::Enum { variants, .. }, Type::EnumVariant(variant)) => variants.contains(variant),
+            (Type::EnumVariant(variant), Type::Enum { variants, .. }) => variants.contains(variant),
 
             (Type::TypeVar(name), x) | (x, Type::TypeVar(name)) => {
                 panic!(
@@ -325,6 +329,10 @@ impl From<&Value> for Type {
             Value::String(_) => Type::String,
             Value::CString(_) => Type::CString,
             Value::Function(_) => Type::Unknown,
+            Value::Enum {
+                discriminant,
+                values,
+            } => Type::Unknown, //todo?
             x => todo!("{:?}", x),
         }
     }

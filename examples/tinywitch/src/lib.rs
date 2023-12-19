@@ -1,7 +1,7 @@
 #![feature(lang_items, start, libc, core_intrinsics, rustc_private)]
 #![no_std]
 extern crate libc;
-use alloc::{vec, ffi::CString};
+use alloc::{ffi::CString, vec};
 use witch_runtime::vm::Vm;
 extern crate wee_alloc;
 #[global_allocator]
@@ -22,7 +22,6 @@ fn my_panic(_info: &core::panic::PanicInfo) -> ! {
 pub extern "C" fn run() -> i32 {
     let mut vm = Vm::new();
     vm.run(vec![21]);
-
 
     unsafe {
         libc::puts(CString::new("Hello world").unwrap().as_ptr());

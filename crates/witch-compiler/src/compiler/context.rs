@@ -2,7 +2,10 @@ use super::{type_system::TypeSystem, LocalVariable};
 use crate::error::{Error, Result};
 use anyhow::anyhow;
 use std::{collections::HashMap, path::PathBuf};
-use witch_parser::{types::Type, Ast};
+use witch_parser::{
+    types::{EnumVariant, Type},
+    Ast,
+};
 use witch_runtime::vm::Op;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -160,8 +163,8 @@ impl<'a> Context<'a> {
             .ok_or(anyhow!(Error::fatal()))
     }
 
-    pub fn get_type(&self, name: &str) -> Type {
-        self.ts.get_type(name).unwrap()
+    pub fn get_type(&self, name: &str) -> Option<Type> {
+        self.ts.get_type(name)
     }
 
     /// Adds a type to the type system. May only be done in the root/global scope!

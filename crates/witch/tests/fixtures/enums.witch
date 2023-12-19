@@ -9,15 +9,21 @@ enum Option[T] {
     None
 }
 
-let x = Some("hello)
+let x = Some("hello")
 
-function has_string(maybe_string: Option[string]) -> bool {
-    match maybe_string {
-        Some(str) => {
-            return true
-        }
-        _ => return false
-    }
+function poop(hej: Option[string]) -> usize {
+    return 5
 }
 
-has_string(x)
+poop(x)
+
+# function has_string(maybe_string: Option[string]) -> bool {
+#     match maybe_string {
+#         Some(str) => {
+#             return true
+#         }
+#         _ => return false
+#     }
+# }
+
+# has_string(x)
