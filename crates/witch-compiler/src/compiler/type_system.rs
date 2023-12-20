@@ -159,6 +159,22 @@ impl TypeSystem {
                 })
             }
 
+            Type::Enum { variants, generics } => {
+                self.push_scope(generics.clone().into_iter().collect());
+                let variants = variants
+                    .into_iter()
+                    .map(|mut v| {
+                        for (i, t) in v.types.iter_mut().enumerate() {
+                            *t = self.resolve(t.clone())?;
+                        }
+                        Ok(v)
+                    })
+                    .collect::<Result<Vec<EnumVariant>>>()?;
+
+                self.pop_scope();
+                Ok(Type::Enum { variants, generics })
+            }
+
             Type::TypeVar(name) => {
                 // Look through substitution table first, then check our types library
                 if let Some(typ) = self.substitutions.last().unwrap().get(&name) {

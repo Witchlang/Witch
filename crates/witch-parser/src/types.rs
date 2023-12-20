@@ -286,8 +286,24 @@ impl PartialEq for Type {
 
             // Checks whether an Enum Variant is of type Enum.
             // E.g. MyEnum.One == MyEnum
-            (Type::Enum { variants, .. }, Type::EnumVariant(variant)) => variants.contains(variant),
-            (Type::EnumVariant(variant), Type::Enum { variants, .. }) => variants.contains(variant),
+            (Type::Enum { variants: v1, .. }, Type::Enum { variants: v2, .. }) => {
+                if v1.len() != v2.len() {
+                    return false;
+                }
+                for (v1, v2) in v1.iter().zip(v2.iter()) {
+                    // check name
+                    if v1.name != v2.name {
+                        return false;
+                    }
+                    // check types
+                    for (t1, t2) in v1.types.iter().zip(v2.types.iter()) {
+                        if t1 != t2 {
+                            return false;
+                        }
+                    }
+                }
+                return true;
+            }
 
             (Type::TypeVar(name), x) | (x, Type::TypeVar(name)) => {
                 panic!(

@@ -11,6 +11,7 @@ use crate::error::Result;
 
 use context::{Context, Scope};
 use witch_parser::ast::{Ast, Key, Operator};
+use witch_parser::pattern::Pattern;
 use witch_parser::types::{EnumVariant, Type, TypeDecl};
 
 use witch_runtime::value::{Function, Value};
@@ -36,6 +37,7 @@ pub fn compile<'a>(ctx: &mut Context, ast: &Ast) -> Result<(Vec<u8>, Type)> {
             args,
             span: _,
         } => call(ctx, expr, args)?,
+        Ast::Case { expr, cases, span } => case(ctx, expr, cases, span)?,
         Ast::Function {
             is_variadic,
             args,
@@ -312,6 +314,8 @@ fn call(ctx: &mut Context, expr: &Box<Ast>, args: &Vec<Ast>) -> Result<(Vec<u8>,
 
                 let resolved_wanted_type = ctx.ts.resolve(wanted_type.clone())?;
 
+                dbg!(&resolved_wanted_type, &supplied_type);
+
                 if resolved_wanted_type != supplied_type {
                     panic!(
                         "type error in function call, wanted: {:?}, got: {:?}",
@@ -380,6 +384,8 @@ fn construct_enum(
     for (idx, wanted_type) in variant.types.clone().into_iter().enumerate() {
         let supplied_type = args_with_types[idx].1.clone();
 
+        dbg!(&supplied_type);
+
         let resolved_wanted_type = ctx.ts.resolve(wanted_type.clone())?;
 
         if resolved_wanted_type != supplied_type {
@@ -389,8 +395,10 @@ fn construct_enum(
             );
         }
 
-        resolved_types.push(resolved_wanted_type);
+        resolved_types.push(supplied_type);
     }
+
+    dbg!(&resolved_types);
 
     bytecode.push(Op::ConstructEnum as u8);
     bytecode.push(variant.discriminant as u8);
@@ -412,6 +420,15 @@ fn construct_enum(
     ctx.pop_type_scope();
 
     return Ok((bytecode, return_type));
+}
+
+fn case(
+    ctx: &mut Context,
+    expr: &Ast,
+    cases: &Vec<(Pattern, Ast)>,
+    span: &Range<usize>,
+) -> Result<(Vec<u8>, Type)> {
+    return Ok((vec![], Type::Unknown));
 }
 
 /// Declares a new function.
