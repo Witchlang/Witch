@@ -11,18 +11,12 @@ enum Option[T] {
 
 let x = Some("hello")
 
-function poop(hej: Option[string]) -> usize {
-    return 5
-}
-
-poop(x)
-
 # function has_string(maybe_string: Option[string]) -> bool {
-#     match maybe_string {
-#         Some(str) => {
+#     case maybe_string {
+#         Some(str) -> {
 #             return true
 #         }
-#         _ => return false
+#         _ -> return false
 #     }
 # }
 

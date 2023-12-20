@@ -388,7 +388,7 @@ pub fn enum_variants<'input>(
                         parent: parent.clone(),
                         name,
                         discriminant: variants.len(),
-                        types: None,
+                        types: vec![],
                     });
                     enum_variants(p, parent, variants)
                 }
@@ -399,7 +399,7 @@ pub fn enum_variants<'input>(
                         parent: parent.clone(),
                         name,
                         discriminant: variants.len(),
-                        types: Some(types),
+                        types,
                     });
                     p.consume(&Kind::RParen)?;
                     enum_variants(p, parent, variants)
@@ -409,7 +409,7 @@ pub fn enum_variants<'input>(
                         parent: parent.clone(),
                         name,
                         discriminant: variants.len(),
-                        types: None,
+                        types: vec![],
                     });
                     Ok(variants)
                 }

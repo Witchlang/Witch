@@ -167,6 +167,13 @@ fn call(ctx: &mut Context, expr: &Box<Ast>, args: &Vec<Ast>) -> Result<(Vec<u8>,
     let mut bytecode = vec![];
     let mut arity = args.len();
 
+    let (mut bc, mut called_type) = compile(ctx, expr)?;
+
+    // If we're calling an enum constructor, bail early and run that instead
+    if let Type::EnumVariant(variant) = called_type {
+        return construct_enum(ctx, variant, args);
+    }
+
     let mut args_bytecode = vec![];
     let mut args_with_types = vec![];
     for arg in args.iter() {
@@ -174,8 +181,6 @@ fn call(ctx: &mut Context, expr: &Box<Ast>, args: &Vec<Ast>) -> Result<(Vec<u8>,
         args_bytecode.append(&mut bc);
         args_with_types.push((arg.clone(), arg_type));
     }
-
-    let (mut bc, mut called_type) = compile(ctx, expr)?;
 
     // If we're calling a function stub, it needs to undergo monomorphization
     if let Type::GenericFunctionStub { scope, idx } = called_type {
@@ -190,12 +195,6 @@ fn call(ctx: &mut Context, expr: &Box<Ast>, args: &Vec<Ast>) -> Result<(Vec<u8>,
         {
             ctx.push_type_scope(&generics);
             for (caller_arg_idx, (_, caller_arg_typ)) in args_with_types.iter().enumerate() {
-                //ctx.push_type_scope(&generics);
-                //dbg!(&ctx.ts.resolve(args[arg_idx].1.clone())?);
-
-                // if ctx.ts.resolve(arg_typ.clone())? != ctx.ts.resolve(args[arg_idx].1.clone())? {
-
-                // }
                 if let Type::TypeVar(ident) = args[caller_arg_idx].1.clone() {
                     // If the arg is a typevar, check the function generics for it
 
@@ -338,11 +337,78 @@ fn call(ctx: &mut Context, expr: &Box<Ast>, args: &Vec<Ast>) -> Result<(Vec<u8>,
                 return_type.clone(),
             ))
         }
+
         _ => {
             dbg!(called_type);
             panic!("attempted to call a non function???");
         }
     }
+}
+
+fn construct_enum(
+    ctx: &mut Context,
+    mut variant: EnumVariant,
+    args: &Vec<Ast>,
+) -> Result<(Vec<u8>, Type)> {
+    let mut bytecode = vec![];
+    let mut args_with_types = vec![];
+    for arg in args.iter() {
+        let (mut bc, arg_type) = compile(ctx, arg)?;
+        bytecode.append(&mut bc);
+        args_with_types.push((arg.clone(), arg_type));
+    }
+
+    let generics = if let Some(Type::Enum { generics, .. }) = ctx.get_type(&variant.parent) {
+        generics
+    } else {
+        vec![]
+    };
+    ctx.push_type_scope(&generics);
+
+    // Compare arguments length against the type.
+    if args.len() != variant.types.len() {
+        panic!(
+            "wrong amount of enum field arguments. want: {:?}, got: {:?}",
+            &variant.types.len(),
+            &args.len()
+        );
+    }
+
+
+    let mut resolved_types = vec![];
+
+    // Type check arguments
+    for (idx, wanted_type) in variant.types.clone().into_iter().enumerate() {
+        let supplied_type = args_with_types[idx].1.clone();
+
+        let resolved_wanted_type = ctx.ts.resolve(wanted_type.clone())?;
+
+        if resolved_wanted_type != supplied_type {
+            panic!(
+                "type error in enum constructor call, wanted: {:?}, got: {:?}",
+                wanted_type, supplied_type
+            );
+        }
+
+        resolved_types.push(resolved_wanted_type);
+    }
+
+    
+
+    bytecode.push(Op::ConstructEnum as u8);
+    bytecode.push(variant.discriminant as u8);
+    bytecode.push(variant.types.len() as u8);
+
+    // Construct return type
+    variant.types = resolved_types;
+    let mut return_type = ctx.get_type(&variant.parent).expect("oops");
+    if let Type::Enum { ref mut variants, .. } = return_type {
+        *variants.iter_mut().find(|v| v.name == variant.name).expect("oops") = variant.clone();
+    }
+
+    ctx.pop_type_scope();
+
+    return Ok((bytecode, return_type));
 }
 
 /// Declares a new function.
@@ -981,14 +1047,9 @@ fn var(ctx: &mut Context, ident: &String) -> Result<(Vec<u8>, Type)> {
 
         match typ.clone() {
             // Type constructor
-            Type::EnumVariant(EnumVariant {
-                types: Some(types), ..
-            }) if types.len() > 0 => {
+            Type::EnumVariant(EnumVariant { types, .. }) if types.len() > 0 => {
                 // Make sure we get called and with the right amount of arguments.
-                if !matches!(
-                    ctx.lineage[ctx.lineage.len() - (2 + types.len())],
-                    Ast::Call { .. }
-                ) {
+                if !matches!(ctx.lineage[ctx.lineage.len() - 2], Ast::Call { .. }) {
                     panic!("this type can only be used as a constructor in a calling context");
                 }
 

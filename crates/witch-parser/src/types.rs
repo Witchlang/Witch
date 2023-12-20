@@ -35,7 +35,7 @@ pub struct EnumVariant {
     pub parent: String,
     pub name: String,
     pub discriminant: usize,
-    pub types: Option<Vec<Type>>,
+    pub types: Vec<Type>,
 }
 
 #[derive(Debug, Clone)]
@@ -330,8 +330,8 @@ impl From<&Value> for Type {
             Value::CString(_) => Type::CString,
             Value::Function(_) => Type::Unknown,
             Value::Enum {
-                discriminant,
-                values,
+                discriminant: _,
+                values: _,
             } => Type::Unknown, //todo?
             x => todo!("{:?}", x),
         }

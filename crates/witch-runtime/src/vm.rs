@@ -81,6 +81,7 @@ pub enum Op {
     GetMember,
     Set,
     SetProperty,
+    ConstructEnum,
 
     SetReturn,
     Jump,
@@ -114,18 +115,19 @@ impl core::convert::From<u8> for Op {
             10 => Op::GetMember,
             11 => Op::Set,
             12 => Op::SetProperty,
+            13 => Op::ConstructEnum,
 
-            13 => Op::SetReturn,
-            14 => Op::Jump,
-            15 => Op::JumpIfFalse,
+            14 => Op::SetReturn,
+            15 => Op::Jump,
+            16 => Op::JumpIfFalse,
 
-            16 => Op::Binary,
-            17 => Op::Return,
-            18 => Op::Call,
+            17 => Op::Binary,
+            18 => Op::Return,
+            19 => Op::Call,
 
-            19 => Op::Collect,
+            20 => Op::Collect,
 
-            20 => Op::Debug,
+            21 => Op::Debug,
 
             _ => Op::Crash,
         }
@@ -624,8 +626,7 @@ impl Vm {
                 }
 
                 Op::SetProperty => {
-                    let idx = self.next_byte();
-                    let property_idx = self.next_byte();
+                    let [idx, property_idx] = self.next_two_bytes();
                     let rhs = self.stack.pop().unwrap();
 
                     let entry = self.stack.get(self.frame().stack_start + idx as usize);
@@ -638,6 +639,19 @@ impl Vm {
                         }
                         _ => unreachable!(),
                     }
+
+                    offset = 2;
+                }
+
+                Op::ConstructEnum => {
+                    let [discriminant, num_fields] = self.next_two_bytes();
+                    let mut values = vec![];
+                    for _ in 0..num_fields {
+                        values.push(self.pop_value().unwrap());
+                    }
+                    values = values.into_iter().rev().collect();
+                    let value = Value::Enum { discriminant: discriminant as usize, values };
+                    self.push_value(value);
 
                     offset = 2;
                 }
