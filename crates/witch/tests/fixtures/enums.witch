@@ -13,11 +13,16 @@ let x = Some("hello")
 
 function has_string(maybe_string: Option[string]) -> bool {
     case maybe_string {
-        # Some(str) -> {
-        #    return true
-        # }
-        _ -> { return false }
+        Some("hello") -> {
+            return true
+        }
+        Some(str) -> {
+            return true
+        }
+       _ -> { return false }
     }
+
+    return maybe_string
 }
 
 has_string(x)

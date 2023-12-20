@@ -428,7 +428,8 @@ fn case(
     cases: &Vec<(Pattern, Ast)>,
     span: &Range<usize>,
 ) -> Result<(Vec<u8>, Type)> {
-    return Ok((vec![], Type::Unknown));
+    dbg!(cases);
+    todo!();
 }
 
 /// Declares a new function.
