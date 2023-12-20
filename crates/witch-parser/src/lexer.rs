@@ -125,6 +125,8 @@ pub enum Kind {
     KwReturn,
     #[token("yield")]
     KwYield,
+    #[token("case")]
+    KwCase,
     #[regex(r"[ \t\f]+", logos::skip)]
     #[regex(r"/\*([^*]|\*+[^*/])*\*?")] // unclosed comments == end
     #[end]

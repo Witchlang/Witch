@@ -2,6 +2,7 @@ use std::{collections::HashMap, ops::Range, path::PathBuf};
 
 use witch_runtime::value::Value;
 
+use crate::pattern::Pattern;
 use crate::types::{Type, TypeDecl};
 
 use super::Spanned;
@@ -101,6 +102,13 @@ pub enum Ast {
     Assignment {
         lhs: Box<Self>,
         rhs: Box<Self>,
+        span: Range<usize>,
+    },
+
+    /// A case expression, used for pattern matching
+    Case {
+        expr: Box<Self>,
+        cases: Vec<(Pattern, Self)>,
         span: Range<usize>,
     },
 

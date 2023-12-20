@@ -650,7 +650,10 @@ impl Vm {
                         values.push(self.pop_value().unwrap());
                     }
                     values = values.into_iter().rev().collect();
-                    let value = Value::Enum { discriminant: discriminant as usize, values };
+                    let value = Value::Enum {
+                        discriminant: discriminant as usize,
+                        values,
+                    };
                     self.push_value(value);
 
                     offset = 2;

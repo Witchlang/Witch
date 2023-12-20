@@ -14,6 +14,8 @@ use logos::Span;
 mod lexer;
 use lexer::Token;
 
+mod pattern;
+
 use crate::error::{Error, Result};
 use crate::types::Type;
 

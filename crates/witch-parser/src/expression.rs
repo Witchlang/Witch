@@ -1,3 +1,4 @@
+use crate::pattern;
 use crate::types::Type;
 use crate::{ast::Key, error::Result};
 use std::collections::HashMap;
@@ -85,6 +86,29 @@ pub fn expression_inner<'input>(
             let ident = p.text(&token).to_string();
 
             Ast::Var(ident)
+        }
+        Some(Kind::KwCase) => {
+            // A case expression is used for pattern matching
+            // case <expr1> {
+            //   pattern1 -> {}
+            //   pattern2 -> {}
+            // }
+
+            p.consume(&Kind::KwCase)?;
+
+            let expr = expression(p)?;
+
+            p.consume(&Kind::LBrace)?;
+
+            let cases = pattern::cases(p, vec![])?;
+
+            p.consume(&Kind::RBrace)?;
+
+            Ast::Case {
+                expr: Box::new(expr),
+                cases,
+                span: start..p.cursor,
+            }
         }
         Some(Kind::LParen) => {
             // An expression starting with a left paren can be

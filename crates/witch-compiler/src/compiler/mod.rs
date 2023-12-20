@@ -374,7 +374,6 @@ fn construct_enum(
         );
     }
 
-
     let mut resolved_types = vec![];
 
     // Type check arguments
@@ -393,8 +392,6 @@ fn construct_enum(
         resolved_types.push(resolved_wanted_type);
     }
 
-    
-
     bytecode.push(Op::ConstructEnum as u8);
     bytecode.push(variant.discriminant as u8);
     bytecode.push(variant.types.len() as u8);
@@ -402,8 +399,14 @@ fn construct_enum(
     // Construct return type
     variant.types = resolved_types;
     let mut return_type = ctx.get_type(&variant.parent).expect("oops");
-    if let Type::Enum { ref mut variants, .. } = return_type {
-        *variants.iter_mut().find(|v| v.name == variant.name).expect("oops") = variant.clone();
+    if let Type::Enum {
+        ref mut variants, ..
+    } = return_type
+    {
+        *variants
+            .iter_mut()
+            .find(|v| v.name == variant.name)
+            .expect("oops") = variant.clone();
     }
 
     ctx.pop_type_scope();
