@@ -1,11 +1,10 @@
 use crate::{
-    error::{Result, Error},
+    error::{Error, Result},
     expression::expression,
     lexer::{Kind, Lexer},
     statement::statement,
     Ast, Parser,
 };
-
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Pattern {
@@ -25,13 +24,33 @@ pub enum Pattern {
     Variable(String),
 
     // _ -> {}
-    Discard,
+    Empty,
+}
+
+/// A single case (or row) in a match expression/table.
+#[derive(Clone, PartialEq, Debug)]
+pub struct Case {
+    pub pattern: Pattern,
+    pub guard: Option<Ast>,
+    pub body: Ast,
+    pub bindings: Vec<String>,
+}
+
+impl Case {
+    fn new(pattern: Pattern, guard: Option<Ast>, body: Ast) -> Self {
+        Self {
+            pattern,
+            guard,
+            body,
+            bindings: vec![],
+        }
+    }
 }
 
 pub fn cases<'input>(
     p: &mut Parser<'input, Lexer<'input>>,
-    mut list: Vec<(Pattern, Ast)>,
-) -> Result<Vec<(Pattern, Ast)>> {
+    mut list: Vec<Case>,
+) -> Result<Vec<Case>> {
     let pattern = pattern(p)?;
     p.consume(&Kind::Arrow)?;
 
@@ -44,20 +63,17 @@ pub fn cases<'input>(
         expression(p)?
     };
 
-    list.push((pattern, ast));
-
+    list.push(Case::new(pattern, None, ast));
 
     if !p.at(Kind::RBrace) {
-        return cases(p, list.clone())
+        return cases(p, list.clone());
     }
 
     Ok(list)
 }
 
-
 pub fn pattern<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<Pattern> {
     match p.peek() {
-
         // Literal strings and numbers
         Some(lit @ Kind::Int | lit @ Kind::String) => {
             let token = p.consume(&lit)?;
@@ -65,14 +81,14 @@ pub fn pattern<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<Pattern>
             match lit {
                 Kind::Int => Ok(Pattern::Number(txt.parse().unwrap())),
                 Kind::String => Ok(Pattern::String(txt.to_string())),
-                _ => unreachable!()
+                _ => unreachable!(),
             }
         }
 
         // Discarded pattern
         Some(Kind::Under) => {
             p.consume(&Kind::Under)?;
-            Ok(Pattern::Discard)
+            Ok(Pattern::Empty)
         }
 
         // Idents can mean a number of different things:
@@ -82,39 +98,36 @@ pub fn pattern<'input>(p: &mut Parser<'input, Lexer<'input>>) -> Result<Pattern>
             let txt = p.text(&token);
             match txt.chars().next().unwrap().is_lowercase() {
                 true => Ok(Pattern::Variable(p.text(&token).to_string())),
-                false => {
-                    match txt {
-                        "True" => Ok(Pattern::Bool(true)),
-                        "False" => Ok(Pattern::Bool(false)),
-                        name => {
-                            let mut fields = vec![];
-                            if p.at(Kind::LParen) {
-                                p.consume(&Kind::LParen)?;
-                                fields = patterns(p, vec![])?;
-                                p.consume(&Kind::RParen)?;
-                            }
-                            Ok(Pattern::Variant(name.to_string(), fields))
-
+                false => match txt {
+                    "True" => Ok(Pattern::Bool(true)),
+                    "False" => Ok(Pattern::Bool(false)),
+                    name => {
+                        let mut fields = vec![];
+                        if p.at(Kind::LParen) {
+                            p.consume(&Kind::LParen)?;
+                            fields = patterns(p, vec![])?;
+                            p.consume(&Kind::RParen)?;
                         }
+                        Ok(Pattern::Variant(name.to_string(), fields))
                     }
-                }
+                },
             }
-
         }
 
         // An invalid pattern
-        _ => {
-            Err(Error::fatal())
-        }
+        _ => Err(Error::fatal()),
     }
 }
 
-pub fn patterns<'input>(p: &mut Parser<'input, Lexer<'input>>, mut list: Vec<Pattern>) -> Result<Vec<Pattern>> {
+pub fn patterns<'input>(
+    p: &mut Parser<'input, Lexer<'input>>,
+    mut list: Vec<Pattern>,
+) -> Result<Vec<Pattern>> {
     list.push(pattern(p)?);
 
     if p.at(Kind::Comma) {
         p.consume(&Kind::Comma)?;
-        return patterns(p, list)
+        return patterns(p, list);
     }
 
     Ok(list)

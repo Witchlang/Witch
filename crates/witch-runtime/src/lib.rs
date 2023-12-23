@@ -18,6 +18,7 @@ macro_rules! dbg {
 
 pub mod builtins;
 mod heap;
+pub mod pattern_matching;
 mod stack;
 pub mod value;
 pub mod vm;

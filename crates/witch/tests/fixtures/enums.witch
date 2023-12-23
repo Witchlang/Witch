@@ -11,18 +11,18 @@ enum Option[T] {
 
 let x = Some("hello")
 
-function has_string(maybe_string: Option[string]) -> bool {
+function has_string(maybe_string: Option[string]) -> string {
     case maybe_string {
-        Some("hello") -> {
-            return true
+        Some("foo") -> {
+            return "foo"
         }
         Some(str) -> {
-            return true
+            return str
         }
-       _ -> { return false }
+        None -> { return "fail" }
     }
 
-    return maybe_string
+    return "fail"
 }
 
 has_string(x)

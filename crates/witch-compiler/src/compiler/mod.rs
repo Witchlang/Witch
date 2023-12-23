@@ -1,6 +1,7 @@
 //! The compiler module takes an AST representation of our program and
 //! emits bytecode from it.
 pub mod context;
+mod pattern_matching;
 mod type_system;
 mod util;
 use std::collections::HashMap;
@@ -11,7 +12,7 @@ use crate::error::Result;
 
 use context::{Context, Scope};
 use witch_parser::ast::{Ast, Key, Operator};
-use witch_parser::pattern::Pattern;
+use witch_parser::pattern::{Case, Pattern};
 use witch_parser::types::{EnumVariant, Type, TypeDecl};
 
 use witch_runtime::value::{Function, Value};
@@ -384,8 +385,6 @@ fn construct_enum(
     for (idx, wanted_type) in variant.types.clone().into_iter().enumerate() {
         let supplied_type = args_with_types[idx].1.clone();
 
-        dbg!(&supplied_type);
-
         let resolved_wanted_type = ctx.ts.resolve(wanted_type.clone())?;
 
         if resolved_wanted_type != supplied_type {
@@ -397,8 +396,6 @@ fn construct_enum(
 
         resolved_types.push(supplied_type);
     }
-
-    dbg!(&resolved_types);
 
     bytecode.push(Op::ConstructEnum as u8);
     bytecode.push(variant.discriminant as u8);
@@ -425,10 +422,15 @@ fn construct_enum(
 fn case(
     ctx: &mut Context,
     expr: &Ast,
-    cases: &Vec<(Pattern, Ast)>,
+    cases: &Vec<Case>,
     span: &Range<usize>,
 ) -> Result<(Vec<u8>, Type)> {
-    dbg!(cases);
+    let (bc, expr_type) = compile(ctx, expr)?;
+
+    let pattern_match_compiler = pattern_matching::Compiler::new(ctx, expr_type);
+    let result = pattern_match_compiler.compile(cases);
+    dbg!(&result);
+
     todo!();
 }
 
