@@ -429,6 +429,11 @@ fn case(
 
     let pattern_match_compiler = pattern_matching::Compiler::new(ctx, expr_type);
     let result = pattern_match_compiler.compile(cases);
+
+    if result.diagnostics.missing {
+        panic!("non exhaustive pattern list");
+    }
+
     dbg!(&result);
 
     todo!();

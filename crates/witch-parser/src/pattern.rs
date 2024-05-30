@@ -33,7 +33,6 @@ pub struct Case {
     pub pattern: Pattern,
     pub guard: Option<Ast>,
     pub body: Ast,
-    pub bindings: Vec<String>,
 }
 
 impl Case {
@@ -42,7 +41,6 @@ impl Case {
             pattern,
             guard,
             body,
-            bindings: vec![],
         }
     }
 }
