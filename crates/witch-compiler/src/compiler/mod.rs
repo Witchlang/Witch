@@ -18,6 +18,8 @@ use witch_parser::types::{EnumVariant, Type, TypeDecl};
 use witch_runtime::value::{Function, Value};
 use witch_runtime::vm::Op;
 
+use self::pattern_matching::Decision;
+
 /// Contains all compile-time information about a locally scoped
 /// variable.
 #[derive(Debug, Clone, PartialEq)]
@@ -315,9 +317,15 @@ fn call(ctx: &mut Context, expr: &Box<Ast>, args: &Vec<Ast>) -> Result<(Vec<u8>,
 
                 let resolved_wanted_type = ctx.ts.resolve(wanted_type.clone())?;
 
-                dbg!(&resolved_wanted_type, &supplied_type);
-
                 if resolved_wanted_type != supplied_type {
+                    if let (Type::Enum { variants, generics }, Type::EnumVariant(variant)) =
+                        (resolved_wanted_type, supplied_type.clone())
+                    {
+                        if variants.contains(&variant) {
+                            continue;
+                        }
+                    }
+
                     panic!(
                         "type error in function call, wanted: {:?}, got: {:?}",
                         wanted_type, supplied_type
@@ -431,12 +439,45 @@ fn case(
     let result = pattern_match_compiler.compile(cases);
 
     if result.diagnostics.missing {
-        panic!("non exhaustive pattern list");
+        panic!("non exhaustive pattern list!");
     }
 
-    dbg!(&result);
+    walk_decision_tree(ctx, result.tree)
+}
 
-    todo!();
+fn walk_decision_tree(ctx: &mut Context, tree: Decision) -> Result<(Vec<u8>, Type)> {
+    let mut bytecode = vec![];
+    let mut typ = Type::Unknown;
+
+    match tree {
+        Decision::Success(body) => {
+            dbg!("success triggered");
+            // compile body.value (ast), but before that insert our variable bindings
+            let (mut self_bc, ty) = compile(ctx, &body.value)?;
+            bytecode.append(&mut self_bc);
+            typ = ty;
+        }
+        Decision::Failure => {
+            todo!("failure triggered");
+        }
+        Decision::Guard {
+            clause,
+            body,
+            subtree,
+        } => {}
+        Decision::Switch(variable, cases) => {
+            // for each case
+            // create a value from the constructor
+            // make comparison against expression at top of stack?
+            // if true, move on to the compiled result body
+            // if false, jump over it
+            for case in cases {
+                return walk_decision_tree(ctx, case.body);
+            }
+        }
+    }
+
+    Ok((bytecode, typ))
 }
 
 /// Declares a new function.

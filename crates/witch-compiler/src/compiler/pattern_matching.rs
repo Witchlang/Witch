@@ -22,11 +22,11 @@ pub enum Decision {
 
 #[derive(Debug)]
 pub struct SwitchCase {
-    constructor: Constructor,
+    pub constructor: Constructor,
 
-    arguments: Vec<Variable>,
+    pub arguments: Vec<Variable>,
 
-    body: Decision,
+    pub body: Decision,
 }
 impl SwitchCase {
     fn new(constructor: Constructor, arguments: Vec<Variable>, body: Decision) -> Self {
@@ -72,13 +72,13 @@ pub struct Body {
     /// Any variables to bind before running the code.
     ///
     /// The tuples are in the form `(name, source)` (i.e `bla = source`).
-    bindings: Vec<(String, Variable)>,
+    pub bindings: Vec<(String, Variable)>,
 
     /// The "code" to run in case of a match.
     ///
     /// We just use an integer for the sake of simplicity, but normally this
     /// would be an AST node, or perhaps an index to an array of AST nodes.
-    value: Ast,
+    pub value: Ast,
 }
 
 /// A variable used in a match expression.
@@ -270,6 +270,7 @@ impl<'ctx, 'program> Compiler<'ctx, 'program> {
 
         match branch_var.r#type.clone() {
             Type::Bool => Decision::Failure, //TODO should be a switch
+
             Type::Enum { variants, .. } => {
                 let cases = variants
                     .iter()

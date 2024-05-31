@@ -1,7 +1,7 @@
 enum Foobar {
     Foo,
     Bar,
-    Baz(usize)
+    Baz
 }
 
 enum Option[T] {
@@ -9,23 +9,15 @@ enum Option[T] {
     None
 }
 
-let x = Some("hello")
+let x = Some("Foo")
 
-function has_string(maybe_string: Option[Foobar]) -> string {
-    case maybe_string {
-        Some(Foo) -> {
-            return "foo"
+function has_string(maybe_string: Option[string]) -> string {
+    return case maybe_string {
+        Some(x) -> {
+            return "bajs"
         }
-        Some(Bar) -> {
-            return "bar"
-        }
-        Some(Baz(num)) -> {
-            return num
-        }
-        None -> { return "fail" }
+        None -> { return "none" }
     }
-
-    return "fail"
 }
 
-has_string(x)
+has_string(None)
