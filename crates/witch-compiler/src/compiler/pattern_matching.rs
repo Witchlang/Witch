@@ -268,8 +268,6 @@ impl<'ctx, 'program> Compiler<'ctx, 'program> {
 
         let branch_var = self.branch_variable(&rows);
 
-        dbg!(&branch_var);
-
         match branch_var.r#type.clone() {
             Type::Bool => Decision::Failure, //TODO should be a switch
 

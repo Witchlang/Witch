@@ -159,7 +159,11 @@ impl TypeSystem {
                 })
             }
 
-            Type::Enum { variants, generics } => {
+            Type::Enum {
+                name,
+                variants,
+                generics,
+            } => {
                 self.push_scope(generics.clone().into_iter().collect());
                 let variants = variants
                     .into_iter()
@@ -172,7 +176,11 @@ impl TypeSystem {
                     .collect::<Result<Vec<EnumVariant>>>()?;
                 self.pop_scope();
 
-                Ok(Type::Enum { variants, generics })
+                Ok(Type::Enum {
+                    name,
+                    variants,
+                    generics,
+                })
             }
 
             Type::TypeVar(name) => {
@@ -240,7 +248,11 @@ impl TypeSystem {
                         })
                     }
 
-                    Type::Enum { variants, generics } => {
+                    Type::Enum {
+                        name,
+                        variants,
+                        generics,
+                    } => {
                         if subs.len() != generics.len() {
                             panic!("generic params must be of same length as available generics");
                         }
@@ -254,7 +266,11 @@ impl TypeSystem {
                             })
                             .collect::<Result<Vec<(String, Type)>>>()?;
 
-                        self.resolve(Type::Enum { variants, generics })
+                        self.resolve(Type::Enum {
+                            name,
+                            variants,
+                            generics,
+                        })
                     }
                     Type::List(_) => {
                         if subs.len() != 1 {

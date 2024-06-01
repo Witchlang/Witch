@@ -163,6 +163,7 @@ pub enum Type {
     /// An enum is simply a list of its variants.
     /// You can't instantiate an enum without a variant.
     Enum {
+        name: String,
         variants: Vec<EnumVariant>,
         generics: Vec<(String, Self)>,
     },
@@ -284,9 +285,34 @@ impl PartialEq for Type {
                 t.implements(properties)
             }
 
+            // Enums are nominally typed, but may have different generic substitutions that can be unequal
+            (
+                Type::Enum { name, generics, .. },
+                Type::Enum {
+                    name: name2,
+                    generics: generics2,
+                    ..
+                },
+            ) => {
+                if name == name2 {
+                    for (v1, v2) in generics.iter().zip(generics2.iter()) {
+                        // check name (should always be true)
+                        if v1.0 != v2.0 {
+                            return false;
+                        }
+                        // check generic substitutions
+                        if v1.1 != v2.1 {
+                            return false;
+                        }
+                    }
+                    return true;
+                }
+                return false;
+            }
+
             // Checks whether an Enum Variant is of type Enum.
             // E.g. MyEnum.One == MyEnum
-            (Type::Enum { variants: v1, .. }, Type::Enum { variants: v2, .. }) => {
+            /* (Type::Enum { variants: v1, .. }, Type::Enum { variants: v2, .. }) => {
                 if v1.len() != v2.len() {
                     return false;
                 }
@@ -303,8 +329,7 @@ impl PartialEq for Type {
                     }
                 }
                 return true;
-            }
-
+            }*/
             (Type::TypeVar(name), x) | (x, Type::TypeVar(name)) => {
                 panic!(
                     "cant compare type var {} with {:?}, need to be resolved",

@@ -318,8 +318,14 @@ fn call(ctx: &mut Context, expr: &Box<Ast>, args: &Vec<Ast>) -> Result<(Vec<u8>,
                 let resolved_wanted_type = ctx.ts.resolve(wanted_type.clone())?;
 
                 if resolved_wanted_type != supplied_type {
-                    if let (Type::Enum { variants, generics }, Type::EnumVariant(variant)) =
-                        (resolved_wanted_type, supplied_type.clone())
+                    if let (
+                        Type::Enum {
+                            name,
+                            variants,
+                            generics,
+                        },
+                        Type::EnumVariant(variant),
+                    ) = (resolved_wanted_type, supplied_type.clone())
                     {
                         if variants.contains(&variant) {
                             continue;
@@ -462,10 +468,9 @@ fn walk_decision_tree(ctx: &mut Context, tree: Decision) -> Result<(Vec<u8>, Typ
 
     match tree {
         Decision::Success(body) => {
-            dbg!("success triggered");
             // compile body.value (ast), but before that insert our variable bindings
-            let (mut self_bc, ty) = compile(ctx, &body.value)?;
-            bytecode.append(&mut self_bc);
+            let (mut body_bytecode, ty) = compile(ctx, &body.value)?;
+            bytecode.append(&mut body_bytecode);
             typ = ty;
         }
         Decision::Failure => {
@@ -482,7 +487,6 @@ fn walk_decision_tree(ctx: &mut Context, tree: Decision) -> Result<(Vec<u8>, Typ
             // make comparison against expression at top of stack?
             // if true, move on to the compiled result body
             // if false, jump over it
-            dbg!(variable);
             for case in cases {
                 return walk_decision_tree(ctx, case.body);
             }
@@ -569,7 +573,6 @@ fn function(
     }
 
     for (arg_name, arg_type) in args.iter() {
-        dbg!(&arg_name, arg_type);
         scope.locals.push(LocalVariable {
             name: arg_name.clone(),
             is_captured: false,
@@ -930,6 +933,7 @@ fn decl_type(
     match decl {
         TypeDecl::Enum { variants, generics } => {
             let typ = Type::Enum {
+                name: name.to_string(),
                 variants: variants.to_owned(),
                 generics: generics
                     .to_owned()

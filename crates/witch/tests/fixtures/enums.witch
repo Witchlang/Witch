@@ -14,7 +14,7 @@ enum Option[T] {
     None
 }
 
-let x = Some(Baz(Ipsum))
+let x = Some(Bar)
 
 function has_string(maybe_string: Option[Foobar]) -> string {
     return case maybe_string {
