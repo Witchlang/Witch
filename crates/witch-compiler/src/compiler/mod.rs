@@ -396,6 +396,14 @@ fn construct_enum(
         let resolved_wanted_type = ctx.ts.resolve(wanted_type.clone())?;
 
         if resolved_wanted_type != supplied_type {
+            if let (Type::Enum { variants, .. }, Type::EnumVariant(variant)) =
+                (resolved_wanted_type, supplied_type.clone())
+            {
+                if variants.contains(&variant) {
+                    continue;
+                }
+            }
+
             panic!(
                 "type error in enum constructor call, wanted: {:?}, got: {:?}",
                 wanted_type, supplied_type
@@ -436,6 +444,7 @@ fn case(
     let (bc, expr_type) = compile(ctx, expr)?;
 
     let pattern_match_compiler = pattern_matching::Compiler::new(ctx, expr_type);
+
     let result = pattern_match_compiler.compile(cases);
 
     if result.diagnostics.missing {
@@ -446,6 +455,8 @@ fn case(
 }
 
 fn walk_decision_tree(ctx: &mut Context, tree: Decision) -> Result<(Vec<u8>, Type)> {
+    //
+
     let mut bytecode = vec![];
     let mut typ = Type::Unknown;
 
@@ -471,6 +482,7 @@ fn walk_decision_tree(ctx: &mut Context, tree: Decision) -> Result<(Vec<u8>, Typ
             // make comparison against expression at top of stack?
             // if true, move on to the compiled result body
             // if false, jump over it
+            dbg!(variable);
             for case in cases {
                 return walk_decision_tree(ctx, case.body);
             }
@@ -557,10 +569,11 @@ fn function(
     }
 
     for (arg_name, arg_type) in args.iter() {
+        dbg!(&arg_name, arg_type);
         scope.locals.push(LocalVariable {
             name: arg_name.clone(),
             is_captured: false,
-            r#type: arg_type.clone(),
+            r#type: ctx.ts.resolve(arg_type.clone())?,
         })
     }
     ctx.scopes.push(scope);
@@ -918,7 +931,11 @@ fn decl_type(
         TypeDecl::Enum { variants, generics } => {
             let typ = Type::Enum {
                 variants: variants.to_owned(),
-                generics: generics.to_owned(),
+                generics: generics
+                    .to_owned()
+                    .into_iter()
+                    .map(|(v, t)| -> Result<(String, Type)> { Ok((v, ctx.ts.resolve(t)?)) })
+                    .collect::<Result<Vec<(String, Type)>>>()?,
             };
             ctx.add_type(name.to_string(), typ.clone())?;
             Ok((vec![], typ))
@@ -1135,7 +1152,8 @@ fn var(ctx: &mut Context, ident: &String) -> Result<(Vec<u8>, Type)> {
                 )?;
                 return Ok((bc, typ));
             }
-            _ => {
+            x => {
+                dbg!(x);
                 panic!("using types other than enum variants in this placement is not supported!");
             }
         }

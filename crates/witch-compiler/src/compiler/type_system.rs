@@ -170,8 +170,8 @@ impl TypeSystem {
                         Ok(v)
                     })
                     .collect::<Result<Vec<EnumVariant>>>()?;
-
                 self.pop_scope();
+
                 Ok(Type::Enum { variants, generics })
             }
 

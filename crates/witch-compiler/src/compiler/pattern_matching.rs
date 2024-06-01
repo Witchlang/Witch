@@ -268,6 +268,8 @@ impl<'ctx, 'program> Compiler<'ctx, 'program> {
 
         let branch_var = self.branch_variable(&rows);
 
+        dbg!(&branch_var);
+
         match branch_var.r#type.clone() {
             Type::Bool => Decision::Failure, //TODO should be a switch
 
@@ -290,41 +292,6 @@ impl<'ctx, 'program> Compiler<'ctx, 'program> {
             }
             x => unimplemented!("{:?}", x),
         }
-
-        // old stuff ...
-
-        /*match &self.tested_type {
-            Type::Enum { variants, generics } => {
-                // Verify that cases' patterns are all variants of this enum
-                let switch_cases = cases
-                    .iter()
-                    .map(|case: &Case| {
-                        let args = vec![];
-                        let switch_cases = match &case.pattern {
-                            Pattern::Variant(name, fields) => {
-                                // find variant if exists, or throw
-                                // iterate all fields of the pattern:
-                                // type check against variant types
-                                self.compile_switch_cases()
-                            }
-                            Pattern::Variable(name) => self.compile_switch_cases(),
-                            Pattern::Empty => self.compile_switch_cases(),
-                            _ => {
-                                panic!("invalid pattern in case");
-                            }
-                        };
-                        SwitchCase {
-                            pattern: case.pattern.clone(),
-                            arguments: args,
-                            body: Decision::Switch(switch_cases),
-                        }
-                    })
-                    .collect();
-
-                Decision::Switch(switch_cases)
-            }
-            _ => unimplemented!(),
-        }*/
     }
 
     fn compile_constructor_cases(
@@ -351,7 +318,7 @@ impl<'ctx, 'program> Compiler<'ctx, 'program> {
 
                         cases[idx].2.push(Row::new(cols, row.guard, row.body));
                     }
-                    _ => todo!(),
+                    x => todo!("{:?}", x),
                 }
 
                 /*if let Pattern::Constructor(cons, args) = col.pattern {
