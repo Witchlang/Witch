@@ -77,6 +77,7 @@ pub enum Op {
     Push,
     Pop,
     Get,
+    Dup,
     GetUpvalue,
     GetMember,
     Set,
@@ -111,23 +112,24 @@ impl core::convert::From<u8> for Op {
             6 => Op::Push,
             7 => Op::Pop,
             8 => Op::Get,
-            9 => Op::GetUpvalue,
-            10 => Op::GetMember,
-            11 => Op::Set,
-            12 => Op::SetProperty,
-            13 => Op::ConstructEnum,
+            9 => Op::Dup,
+            10 => Op::GetUpvalue,
+            11 => Op::GetMember,
+            12 => Op::Set,
+            13 => Op::SetProperty,
+            14 => Op::ConstructEnum,
 
-            14 => Op::SetReturn,
-            15 => Op::Jump,
-            16 => Op::JumpIfFalse,
+            15 => Op::SetReturn,
+            16 => Op::Jump,
+            17 => Op::JumpIfFalse,
 
-            17 => Op::Binary,
-            18 => Op::Return,
-            19 => Op::Call,
+            18 => Op::Binary,
+            19 => Op::Return,
+            20 => Op::Call,
 
-            20 => Op::Collect,
+            21 => Op::Collect,
 
-            21 => Op::Debug,
+            22 => Op::Debug,
 
             _ => Op::Crash,
         }
@@ -144,6 +146,10 @@ pub struct CallFrame {
 pub struct Vm {
     pub stack: Stack,
     pub heap: Heap,
+
+    // Todo this should only be available under debug_assertions
+    debug_mode: bool,
+
     frames: Vec<CallFrame>,
 
     modules: Vec<Stack>,
@@ -176,6 +182,7 @@ pub fn hej(_vm: &mut Vm) {
 impl Vm {
     pub fn new() -> Self {
         Self {
+            debug_mode: true,
             stack: Stack::new(),
             heap: Heap::default(),
             modules: vec![],
@@ -231,6 +238,7 @@ impl Vm {
         match entry {
             Entry::Pointer(Pointer::Heap(idx)) => self.heap.get(idx),
             Entry::Usize(u) => Rc::new(RefCell::new(Value::Usize(u))),
+            Entry::Bool(b) => Rc::new(RefCell::new(Value::Bool(b))),
             x => todo!("{:?}", x),
         }
     }
@@ -403,10 +411,32 @@ impl Vm {
             #[cfg(feature = "profile")]
             let opcode_timer_start = std::time::Instant::now();
 
-            // An offset to the instruction pointer, for when ops consume more bytes than 1
             match op {
                 Op::Debug => {
-                    dbg!(&self.stack.len());
+                    if self.debug_mode {
+                        println!("OP::DEBUG")
+                    }
+
+                    println!("Stack (len {})", &self.stack.len());
+
+                    self.stack.iter().enumerate().rev().for_each(|(idx, e)| {
+                        let v = match e {
+                            Entry::Pointer(p) => match p {
+                                Pointer::Heap(i) => {
+                                    (*self.heap.get(*i).clone()).clone().into_inner()
+                                }
+                                Pointer::Vtable(x) => todo!("{:?}", x),
+                                Pointer::Builtin(y) => todo!("{:?}", y),
+                            },
+                            Entry::Function(f) => {
+                                Value::String(format!("[function, bytecode_addr={}]", f.addr))
+                            }
+                            _ => Value::from(*e),
+                        };
+                        println!("{} :: {:?}", idx, v);
+                    });
+
+                    println!("=========================================================\n");
                 }
 
                 Op::SetupModule => {
@@ -448,6 +478,9 @@ impl Vm {
                 }
 
                 Op::GetFunction => {
+                    if self.debug_mode {
+                        println!("OP::GetFunction")
+                    }
                     let idx = self.next_byte();
                     self.stack
                         .push(Entry::Pointer(Pointer::Vtable(idx as usize)));
@@ -471,6 +504,10 @@ impl Vm {
                     let (value, _): (Value, usize) =
                         bincode::serde::decode_from_slice(value_bytes, bincode::config::legacy())
                             .unwrap();
+
+                    if self.debug_mode {
+                        println!("OP::PUSH {:?}", &value);
+                    }
 
                     let stackentry = match value {
                         Value::Usize(i) => Entry::Usize(i),
@@ -534,15 +571,30 @@ impl Vm {
                 }
 
                 Op::Pop => {
+                    if self.debug_mode {
+                        println!("OP::Pop");
+                    }
                     self.stack.pop();
                 }
 
                 Op::Get => {
+                    if self.debug_mode {
+                        println!("OP::Get");
+                    }
                     let b = self.next_byte();
                     let entry = self.stack.get(self.frame().stack_start + b as usize);
                     self.stack.push(entry);
 
                     offset = 1;
+                }
+
+                Op::Dup => {
+                    if self.debug_mode {
+                        println!("OP::Dup");
+                    }
+                    if let Some(top) = self.stack.last_mut().cloned() {
+                        self.stack.push(top);
+                    }
                 }
 
                 Op::GetUpvalue => {
@@ -562,6 +614,9 @@ impl Vm {
 
                 // Gets a list item by index
                 Op::GetMember => {
+                    if self.debug_mode {
+                        println!("OP::GetMember");
+                    }
                     let [first, second] = self.next_two_bytes();
                     let idx_is_next_byte = first == 1;
 
@@ -601,11 +656,17 @@ impl Vm {
                     }
                 }
 
+                // Sets (replaces) the stack entry at idx with the entry at the current top of the stack
                 Op::Set => {
                     let idx = self.next_byte();
                     let stackentry = self.stack.pop().unwrap();
 
                     let stack_idx = self.frame().stack_start + idx as usize;
+
+                    if self.debug_mode {
+                        println!("OP::Set stack idx {} to {:?}", stack_idx, &stackentry);
+                    }
+
                     if stack_idx == self.stack.len() {
                         self.stack.push(stackentry);
                     } else {
@@ -626,6 +687,9 @@ impl Vm {
                 }
 
                 Op::SetProperty => {
+                    if self.debug_mode {
+                        println!("OP::SetProperty");
+                    }
                     let [idx, property_idx] = self.next_two_bytes();
                     let rhs = self.stack.pop().unwrap();
 
@@ -644,6 +708,9 @@ impl Vm {
                 }
 
                 Op::ConstructEnum => {
+                    if self.debug_mode {
+                        println!("OP::ConstructEnum");
+                    }
                     let [discriminant, num_fields] = self.next_two_bytes();
                     let mut values = vec![];
                     for _ in 0..num_fields {
@@ -662,12 +729,19 @@ impl Vm {
                 // Sets the next byte as the return address on the stack.
                 // This gets placed before the arguments for an upcoming Call instruction.
                 Op::SetReturn => {
+                    if self.debug_mode {
+                        println!("OP::SetReturn");
+                    }
                     let jmp_offset = usize::from_ne_bytes(self.next_eight_bytes());
                     self.stack.push(Entry::Usize(self.frame().ip + jmp_offset));
                     offset = 8;
                 }
 
-                Op::Jump => {}
+                Op::Jump => {
+                    if self.debug_mode {
+                        println!("OP::Jump");
+                    }
+                }
 
                 Op::JumpIfFalse => {
                     let mut jmp_offset = 0;
@@ -675,11 +749,17 @@ impl Vm {
                     if let Entry::Bool(false) = cond {
                         jmp_offset = u64::from_ne_bytes(self.next_eight_bytes()) as usize;
                     }
+                    if self.debug_mode {
+                        println!("OP::JumpIfFalse [{}]", jmp_offset);
+                    }
                     offset = 8 + jmp_offset;
                 }
 
                 // Conducts a binary operation between the two top entries on the stack.
                 Op::Binary => {
+                    if self.debug_mode {
+                        println!("OP::Binary");
+                    }
                     let bin_op = InfixOp::from(self.next_byte());
                     let b = self.stack.pop().unwrap();
                     let a = self.stack.pop().unwrap();
@@ -707,6 +787,29 @@ impl Vm {
                                     ))
                                 }
 
+                                //TODO compare should be moved to a separate function that can be called for each value in the enums
+                                (
+                                    Value::Enum {
+                                        discriminant: da,
+                                        values: va,
+                                    },
+                                    InfixOp::Eq,
+                                    Value::Enum {
+                                        discriminant: db,
+                                        values: vb,
+                                    },
+                                ) => {
+                                    if !va.is_empty() || !vb.is_empty() {
+                                        todo!("cant compare enums with values yet");
+                                    }
+
+                                    if da == db {
+                                        Entry::Bool(true)
+                                    } else {
+                                        Entry::Bool(false)
+                                    }
+                                }
+
                                 x => {
                                     dbg!(&x);
                                     dbg!(&self.stack);
@@ -727,6 +830,9 @@ impl Vm {
                 // Pops the current callframe, truncates the stack to its original size
                 // and puts the return value on top of it.
                 Op::Return => {
+                    if self.debug_mode {
+                        println!("OP::Return");
+                    }
                     let frame = self.frames.pop().unwrap();
 
                     self.close_upvalues(frame);
@@ -752,6 +858,9 @@ impl Vm {
                 }
 
                 Op::Call => {
+                    if self.debug_mode {
+                        println!("OP::Call");
+                    }
                     let entry = self.stack.pop().unwrap();
                     match entry {
                         Entry::Pointer(Pointer::Builtin(p)) => {
@@ -765,6 +874,9 @@ impl Vm {
                 }
 
                 Op::Collect => {
+                    if self.debug_mode {
+                        println!("OP::Collect");
+                    }
                     let vec_len = usize::from_ne_bytes(self.next_eight_bytes());
                     let mut vec = vec![];
                     for _ in 0..vec_len {

@@ -2,7 +2,7 @@ use std::{collections::HashMap, ops::Range, path::PathBuf};
 
 use witch_runtime::value::Value;
 
-use crate::pattern::{Case, Pattern};
+use crate::pattern::Case;
 use crate::types::{Type, TypeDecl};
 
 use super::Spanned;

@@ -53,6 +53,14 @@ pub fn expression_inner<'input>(
                 _ => unreachable!(),
             }
         }
+        Some(Kind::KwFalse) => {
+            let _ = p.consume(&Kind::KwFalse)?;
+            Ast::Value(Value::Bool(false))
+        }
+        Some(Kind::KwTrue) => {
+            let _ = p.consume(&Kind::KwTrue)?;
+            Ast::Value(Value::Bool(true))
+        }
         Some(Kind::KwNew) => {
             // A struct expression
             // new Foo {}

@@ -4,6 +4,7 @@ pub mod context;
 mod pattern_matching;
 mod type_system;
 mod util;
+use core::panic;
 use std::collections::HashMap;
 use std::ops::Range;
 use std::path::PathBuf;
@@ -11,6 +12,7 @@ use std::path::PathBuf;
 use crate::error::Result;
 
 use context::{Context, Scope};
+use pattern_matching::Constructor;
 use witch_parser::ast::{Ast, Key, Operator};
 use witch_parser::pattern::{Case, Pattern};
 use witch_parser::types::{EnumVariant, Type, TypeDecl};
@@ -447,22 +449,44 @@ fn case(
     cases: &Vec<Case>,
     span: &Range<usize>,
 ) -> Result<(Vec<u8>, Type)> {
-    let (bc, expr_type) = compile(ctx, expr)?;
+    // Put the tested expression on the stack for later comparisons
+    let (mut bytecode, expr_type) = compile(ctx, expr)?;
 
-    let pattern_match_compiler = pattern_matching::Compiler::new(ctx, expr_type);
-
-    let result = pattern_match_compiler.compile(cases);
+    let result = pattern_matching::Compiler::new(ctx, expr_type.clone()).compile(cases);
 
     if result.diagnostics.missing {
         panic!("non exhaustive pattern list!");
     }
 
-    walk_decision_tree(ctx, result.tree)
+    /*
+        = Assembly order =
+        PUSH tested expression onto the stack
+        JUMP ahead 2 // Initially skip the long jump
+        JUMP ahead <length of entire decision tree bytecode + 1>
+
+        - Decision tree bytecode:
+            Switch:
+                Construct predicate.
+                Depending on pattern, compare the entire thing or compare field entries by key from the constructor against the tested expression
+                If any is false, JUMP ahead to <success body + 1> to the next predicate
+            Success: Else, the predicate is true. New scope is pushed. Potential variables get assigned by copy from the tested expressions field index.
+                    At the end of the block, JUMP backwards <length of decision tree so far +1> to then long jump over the entire thing
+
+
+    */
+
+    let (mut bc, typ) = walk_decision_tree(ctx, result.tree, &expr_type)?;
+
+    bytecode.append(&mut bc);
+
+    return Ok((bytecode, typ));
 }
 
-fn walk_decision_tree(ctx: &mut Context, tree: Decision) -> Result<(Vec<u8>, Type)> {
-    //
-
+fn walk_decision_tree(
+    ctx: &mut Context,
+    tree: Decision,
+    tested_type: &Type,
+) -> Result<(Vec<u8>, Type)> {
     let mut bytecode = vec![];
     let mut typ = Type::Unknown;
 
@@ -480,7 +504,9 @@ fn walk_decision_tree(ctx: &mut Context, tree: Decision) -> Result<(Vec<u8>, Typ
             clause,
             body,
             subtree,
-        } => {}
+        } => {
+            todo!("guard triggered");
+        }
         Decision::Switch(variable, cases) => {
             // for each case
             // create a value from the constructor
@@ -488,7 +514,43 @@ fn walk_decision_tree(ctx: &mut Context, tree: Decision) -> Result<(Vec<u8>, Typ
             // if true, move on to the compiled result body
             // if false, jump over it
             for case in cases {
-                return walk_decision_tree(ctx, case.body);
+                match case.constructor.clone() {
+                    Constructor::Variant(vtyp, discriminant) => {
+                        if &vtyp != tested_type {
+                            panic!("bad type, wanted {:?}, got {:?}", tested_type, vtyp);
+                        }
+
+                        let value = Value::Enum {
+                            discriminant,
+                            values: case
+                                .arguments
+                                .into_iter()
+                                .map(|v| Value::Usize(v.id))
+                                .collect(),
+                        };
+                        bytecode.push(Op::Dup as u8); // Cases run after each other, so we know the top of stack is our tested expression
+                        let (mut bc, ty) = compile(ctx, &Ast::Value(value))?;
+                        bytecode.append(&mut bc);
+                    }
+                    _ => todo!(),
+                }
+
+                // now the case test is on the stack
+                // lets compare it against the tested
+                bytecode.push(Op::Binary as u8);
+                bytecode.push(Operator::Eq as u8);
+
+                bytecode.push(Op::JumpIfFalse as u8);
+
+                // Jump the size of the Then statement + this len value + one more instruction
+                let (mut then_bytecode, then_type) =
+                    walk_decision_tree(ctx, case.body, tested_type)?;
+                //TODO typecheck then_type matches current return type
+                let mut then_len = (then_bytecode.len() + 1).to_ne_bytes().to_vec();
+                bytecode.append(&mut then_len);
+                dbg!(then_bytecode.len());
+                bytecode.append(&mut then_bytecode);
+                bytecode.push(Op::Debug as u8);
             }
         }
     }

@@ -9,29 +9,18 @@ enum Foobar {
     Baz(Lorem)
 }
 
-enum Option[T] {
-    Some(T),
-    None
+enum Option {
+    None,
+    Some
 }
 
-let x = Some(Bar)
+let x = Some
 
-function has_string(maybe_string: Option[Foobar]) -> string {
-    return case maybe_string {
-        Some(Foo) -> {
-            return "foo"
-        } 
-        Some(Bar) -> {
-            return "bajs"
-        }
-        Some(Baz(Ipsum)) -> {
-            return "bajs"
-        }
-        Some(Baz(x)) -> {
-            return "bajs"
-        }
-        None -> { return "none" }
+function is_some(maybe: Option) -> string {
+    return case maybe {
+        Some -> { true } 
+        None -> { false }
     }
 }
 
-has_string(x)
+is_some(x)

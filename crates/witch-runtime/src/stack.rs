@@ -30,10 +30,10 @@ pub enum Entry {
 }
 
 impl Entry {
-    pub fn as_heap_pointer(self) -> Pointer {
+    pub fn heap_pointer(self) -> Option<usize> {
         match self {
-            Entry::Pointer(p) => p,
-            _ => unreachable!(),
+            Entry::Pointer(Pointer::Heap(i)) => Some(i),
+            _ => None,
         }
     }
 }
@@ -66,6 +66,9 @@ impl Default for Stack {
 impl Stack {
     pub fn new() -> Self {
         Self { data: vec![] }
+    }
+    pub fn iter(&mut self) -> alloc::slice::Iter<Entry> {
+        self.data.iter()
     }
     pub fn push(&mut self, entry: Entry) {
         self.data.push(entry);

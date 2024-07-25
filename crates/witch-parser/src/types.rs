@@ -307,7 +307,7 @@ impl PartialEq for Type {
                     }
                     return true;
                 }
-                return false;
+                false
             }
 
             // Checks whether an Enum Variant is of type Enum.
@@ -358,6 +358,7 @@ impl Hash for Type {
 impl From<&Value> for Type {
     fn from(value: &Value) -> Type {
         match value {
+            Value::Bool(_) => Type::Bool,
             Value::Usize(_) => Type::Usize,
             Value::Isize(_) => Type::Isize,
             Value::List(vec) => {

@@ -89,6 +89,10 @@ pub enum Kind {
     Ident,
 
     // Keywords
+    #[token("true")]
+    KwTrue,
+    #[token("false")]
+    KwFalse,
     #[token("let")]
     KwLet,
     #[token("new")]
